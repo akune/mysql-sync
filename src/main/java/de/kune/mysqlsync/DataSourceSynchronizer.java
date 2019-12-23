@@ -106,7 +106,7 @@ public class DataSourceSynchronizer {
         if (outputFile != null) {
             File f = new File(outputFile);
             if (f.exists() && f.isDirectory()) {
-                outputFile = new File(f, (incremental ? "incr-" :"full-") + sourceSchema + "-" + targetSchema + "-" + new SimpleDateFormat("YYYY-MM-dd-HH-mm-ss-z").format(new Date()) + ".sql").getAbsolutePath();
+                outputFile = new File(f, (incremental ? "incr-" :"full-") + sourceSchema + "-" + targetSchema + "-" + new SimpleDateFormat("YYYY-MM-dd-HH-mm-ss-z").format(new Date()) + (anonymizerMap.isEmpty() ? "" : "_anon") + ".sql").getAbsolutePath();
             }
         }
         Set<String> tables = determineSyncTables(sourceSchema, targetSchema);
@@ -131,10 +131,16 @@ public class DataSourceSynchronizer {
                 }
 
                 StringBuilder buf = new StringBuilder();
+
                 executeAndWriteLn("-- -----------------------------------------------------------------", null, writer, null);
-                executeAndWriteLn("SET AUTOCOMMIT=0;", stmt, writer, buf);
-                executeAndWriteLn("SET UNIQUE_CHECKS=0;", stmt, writer, buf);
-                executeAndWriteLn("SET FOREIGN_KEY_CHECKS=0;", stmt, writer, buf);
+                executeAndWriteLn("/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;", stmt, writer, buf);
+                executeAndWriteLn("/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;", stmt, writer, buf);
+                executeAndWriteLn("/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;", stmt, writer, buf);
+                executeAndWriteLn("/*!40101 SET NAMES utf8 */;", stmt, writer, buf);
+                executeAndWriteLn("SET NAMES utf8mb4;", stmt, writer, buf);
+                executeAndWriteLn("/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;", stmt, writer, buf);
+                executeAndWriteLn("/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;", stmt, writer, buf);
+                executeAndWriteLn("/*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;", stmt, writer, buf);
                 executeAndWriteLn("-- -----------------------------------------------------------------", null, writer, null);
 
                 tables.stream().sorted().forEachOrdered(table -> {
@@ -155,11 +161,14 @@ public class DataSourceSynchronizer {
                         throw new RuntimeException(e);
                     }
                 });
+
                 executeAndWriteLn("-- -----------------------------------------------------------------", null, writer, null);
-                executeAndWriteLn("COMMIT;", stmt, writer, buf);
-                executeAndWriteLn("SET AUTOCOMMIT=1;", stmt, writer, buf);
-                executeAndWriteLn("SET UNIQUE_CHECKS=1;", stmt, writer, buf);
-                executeAndWriteLn("SET FOREIGN_KEY_CHECKS=1;", stmt, writer, buf);
+                executeAndWriteLn("/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;", null, writer, null);
+                executeAndWriteLn("/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;", null, writer, null);
+                executeAndWriteLn("/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;", null, writer, null);
+                executeAndWriteLn("/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;", null, writer, null);
+                executeAndWriteLn("/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;", null, writer, null);
+                executeAndWriteLn("/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;", null, writer, null);
                 executeAndWriteLn("-- -----------------------------------------------------------------", null, writer, null);
 
                 if (writer != null) {
@@ -213,7 +222,11 @@ public class DataSourceSynchronizer {
 
     private void insert(PrintWriter writer, Statement stmt, StringBuilder buf, String table, Set<String> columns, Map<String, Object> row, DatabaseUtil.ResultContext rs) throws SQLException {
         if (rs.isFirstRow()) {
+//            executeAndWriteLn("ALTER TABLE " + DatabaseUtil.armor(table) + " DISABLE KEYS;", stmt, writer, buf);
+            executeAndWriteLn("LOCK TABLES " + DatabaseUtil.armor(table) + " WRITE;", stmt, writer, buf);
+            executeAndWriteLn("/*!40000 ALTER TABLE " + DatabaseUtil.armor(table) + " DISABLE KEYS */;", stmt, writer, buf);
             executeAndWriteLn("INSERT " + DatabaseUtil.armor(table) + " (" + columns.stream().map(DatabaseUtil::armor).collect(joining(",")) + ") VALUES ", stmt, writer, buf);
+
         }
         executeAndWrite("  (" + row.entrySet().stream()
                 .map(e->anonymize(table, e.getKey(), e.getValue()))
@@ -221,6 +234,9 @@ public class DataSourceSynchronizer {
                 .collect(joining(",")) + ")", stmt, writer, buf);
         if (rs.isLastRow()) {
             executeAndWriteLn(";", stmt, writer, buf);
+//            executeAndWriteLn("ALTER TABLE " + DatabaseUtil.armor(table) + " ENABLE KEYS;", stmt, writer, buf);
+            executeAndWriteLn("/*!40000 ALTER TABLE " + DatabaseUtil.armor(table) + " ENABLE KEYS */;", stmt, writer, buf);
+            executeAndWriteLn("UNLOCK TABLES;", stmt, writer, buf);
         } else if (rs.getRow() > 1 && (rs.getRow() - 1) % 150 == 0) {
             executeAndWriteLn(";", stmt, writer, buf);
             executeAndWriteLn("INSERT " + DatabaseUtil.armor(table) + " (" + columns.stream().map(DatabaseUtil::armor).collect(joining(",")) + ") VALUES ", stmt, writer, buf);
@@ -264,6 +280,7 @@ public class DataSourceSynchronizer {
         }
         if (writer != null) {
             writer.println(s);
+            writer.flush();
         }
     }
 
