@@ -5,7 +5,10 @@ import de.kune.mysqlsync.anonymizer.FieldAnonymizer;
 import org.apache.commons.cli.*;
 
 import javax.sql.DataSource;
+import java.util.Collections;
+import java.util.Map;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 
 public class SynchronizerCli {
     private static final Logger LOGGER = Logger.getLogger(SynchronizerCli.class.getName());
@@ -90,13 +93,9 @@ public class SynchronizerCli {
                 ((MysqlDataSource) targetDataSource).setUrl(targetUrl);
                 ((MysqlDataSource) targetDataSource).setUser(tUser);
                 ((MysqlDataSource) targetDataSource).setPassword(tPassword);
-                if (!cmd.hasOption(anonymize.getOpt())) {
-                    new DataSourceSynchronizer(dataSource, targetDataSource).sync(sourceSchema, targetSchema, outputFileName,
-                            isDryRun, isIncremental, Integer.valueOf(cmd.getOptionValue(maxRowsPerChunk.getOpt(), DEFAULT_MAX_CHUNK_SIZE)));
-                } else {
-                    new DataSourceSynchronizer(dataSource, targetDataSource, FieldAnonymizer.DEFAULT_ANONYMIZERS).sync(sourceSchema, targetSchema, outputFileName,
-                            isDryRun, isIncremental, Integer.valueOf(cmd.getOptionValue(maxRowsPerChunk.getOpt(), DEFAULT_MAX_CHUNK_SIZE)));
-                }
+                Map<Pattern, FieldAnonymizer> anonymizers = cmd.hasOption(anonymize.getOpt()) ? FieldAnonymizer.DEFAULT_ANONYMIZERS : Collections.emptyMap();
+                new DataSourceSynchronizer(dataSource, targetDataSource, anonymizers).sync(sourceSchema, targetSchema, outputFileName,
+                        isDryRun, isIncremental, Integer.valueOf(cmd.getOptionValue(maxRowsPerChunk.getOpt(), DEFAULT_MAX_CHUNK_SIZE)));
             }
         } catch (ParseException e) {
             LOGGER.severe(e.getMessage());
