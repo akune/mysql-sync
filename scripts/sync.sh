@@ -11,7 +11,7 @@ mkdir -p $scriptDir 2> /dev/null
 
 SYNCS=""
 unset INCREMENTAL
-if [ -e "$@" ]; then
+if [ "$#" == 0 ]; then
   HELP=true
 fi
 for i in "$@"
@@ -58,6 +58,10 @@ case $i in
     ;;
     -a|--anonymize)
     ANONYMIZE=true
+    shift # past argument=value
+    ;;
+    -d|--dry-run)
+    DRY_RUN=true
     shift # past argument=value
     ;;
     -?|--help|-h)
@@ -122,5 +126,9 @@ for s in $SYNCS; do
   if [ $ANONYMIZE ]; then
     PARAMS="$PARAMS -anonymize"
   fi
+  if [ $DRY_RUN ]; then
+    PARAMS="$PARAMS -dry-run"
+  fi
+  echo "java -Xmx4G -jar $jar $PARAMS"
   java -Xmx4G -jar $jar $PARAMS || exit 1
 done
