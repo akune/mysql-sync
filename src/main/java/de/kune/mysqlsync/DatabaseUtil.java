@@ -191,7 +191,7 @@ public final class DatabaseUtil {
      * @return the armored expression
      */
     public static String armor(String expression) {
-        if (!expression.startsWith("`") && !expression.endsWith("`") && expression.contains("-")) {
+        if (!expression.startsWith("`") && !expression.endsWith("`") && (expression.contains("-") || expression.contains("."))) {
             return "`" + expression + "`";
         } else
             return expression;
