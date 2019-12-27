@@ -21,8 +21,7 @@ import java.util.stream.Stream;
 
 import static java.lang.String.format;
 import static java.util.Arrays.asList;
-import static java.util.stream.Collectors.joining;
-import static java.util.stream.Collectors.toList;
+import static java.util.stream.Collectors.*;
 
 public class DataSourceSynchronizer {
 
@@ -44,12 +43,14 @@ public class DataSourceSynchronizer {
     private static Set<String> determineTables(DataSource dataSource, String schema) throws SQLException {
         return DatabaseUtil.query(dataSource, "SELECT tt.TABLE_NAME\n" +
                 "  FROM INFORMATION_SCHEMA.TABLES tt\n" +
-                "  WHERE tt.TABLE_SCHEMA='" + schema + "' and tt.table_name not in ('schema_version', 'flyway_schema_history')").stream().map(e -> e.get("TABLE_NAME")).collect(Collectors.toSet());
+                "  WHERE tt.TABLE_SCHEMA='" + schema + "' and tt.table_name not in ('schema_version', 'flyway_schema_history')").stream().map(e -> e.get("TABLE_NAME")).collect(toSet());
     }
 
     private Set<String> determineSyncTables(String sourceSchema, String targetSchema) throws SQLException {
         Set<String> result = determineTables(source, sourceSchema);
-        result.retainAll(determineTables(target, targetSchema));
+        if (targetSchema != null) {
+            result.retainAll(determineTables(target, targetSchema));
+        }
         return result;
     }
 
@@ -64,49 +65,58 @@ public class DataSourceSynchronizer {
                     result.addAll(e2.stream().filter(Objects::nonNull).collect(toList()));
                     return result;
                 }));
-        Map<String, Set<String>> targetIdsByTable = DatabaseUtil.query(target, "SELECT t.table_name, c.column_name\n" +
-                "  FROM INFORMATION_SCHEMA.TABLES t\n" +
-                "  LEFT JOIN INFORMATION_SCHEMA.COLUMNS c on c.table_name = t.table_name and c.table_schema = t.table_schema and c.column_key = 'PRI'\n" +
-                "  WHERE t.TABLE_SCHEMA='" + targetSchema + "' and t.table_name in (" + tables.stream().map(s -> "'" + s + "'").collect(joining(", ")) + ")")
-                .stream()
-                .collect(Collectors.toMap(e -> e.get("TABLE_NAME"), e -> new HashSet<String>(asList(e.get("COLUMN_NAME")).stream().filter(Objects::nonNull).collect(toList())), (e1, e2) -> {
-                    HashSet<String> result = new HashSet<>(e1.stream().filter(Objects::nonNull).collect(toList()));
-                    result.addAll(e2.stream().filter(Objects::nonNull).collect(toList()));
-                    result.remove(null);
-                    return result;
-                }));
-        if (!sourceIdsByTable.equals(targetIdsByTable)) {
-            throw new IllegalStateException(format("synch tables have different primary keys source=%s, target=%s", sourceIdsByTable, targetIdsByTable));
+        if (targetSchema != null) {
+            Map<String, Set<String>> targetIdsByTable = DatabaseUtil.query(target, "SELECT t.table_name, c.column_name\n" +
+                    "  FROM INFORMATION_SCHEMA.TABLES t\n" +
+                    "  LEFT JOIN INFORMATION_SCHEMA.COLUMNS c on c.table_name = t.table_name and c.table_schema = t.table_schema and c.column_key = 'PRI'\n" +
+                    "  WHERE t.TABLE_SCHEMA='" + targetSchema + "' and t.table_name in (" + tables.stream().map(s -> "'" + s + "'").collect(joining(", ")) + ")")
+                    .stream()
+                    .collect(Collectors.toMap(e -> e.get("TABLE_NAME"), e -> new HashSet<String>(asList(e.get("COLUMN_NAME")).stream().filter(Objects::nonNull).collect(toList())), (e1, e2) -> {
+                        HashSet<String> result = new HashSet<>(e1.stream().filter(Objects::nonNull).collect(toList()));
+                        result.addAll(e2.stream().filter(Objects::nonNull).collect(toList()));
+                        result.remove(null);
+                        return result;
+                    }));
+            if (!sourceIdsByTable.equals(targetIdsByTable)) {
+                throw new IllegalStateException(format("synch tables have different primary keys source=%s, target=%s", sourceIdsByTable, targetIdsByTable));
+            }
         }
         return sourceIdsByTable;
     }
 
     private Map<String, Set<String>> determineSyncColumnsOfSyncTables(String sourceSchema, String targetSchema, Set<String> tables) throws SQLException {
-        Map<String, List<String>> sourceColumnsByTable = DatabaseUtil.query(source, "SELECT t.table_name, c.column_name\n" +
+        Map<String, Set<String>> sourceColumnsByTable = DatabaseUtil.query(source, "SELECT t.table_name, c.column_name\n" +
                 "  FROM INFORMATION_SCHEMA.TABLES t\n" +
                 "  LEFT JOIN INFORMATION_SCHEMA.COLUMNS c on c.table_name = t.table_name and c.table_schema = t.table_schema and c.column_key <> 'PRI'\n" +
                 "  WHERE t.TABLE_SCHEMA='" + sourceSchema + "' and t.table_name in (" + tables.stream().map(DatabaseUtil::toValue).collect(joining(", ")) + ")").stream()
-                .collect(Collectors.toMap(e -> e.get("TABLE_NAME"), e -> asList(e.get("COLUMN_NAME")), (e1, e2) -> Stream.concat(e1.stream(), e2.stream()).collect(toList())));
-        Map<String, List<String>> targetColumnsByTable = DatabaseUtil.query(target, "SELECT t.table_name, c.column_name\n" +
-                "  FROM INFORMATION_SCHEMA.TABLES t\n" +
-                "  LEFT JOIN INFORMATION_SCHEMA.COLUMNS c on c.table_name = t.table_name and c.table_schema = t.table_schema and c.column_key <> 'PRI'\n" +
-                "  WHERE t.TABLE_SCHEMA='" + targetSchema + "' and t.table_name in (" + tables.stream().map(DatabaseUtil::toValue).collect(joining(", ")) + ")").stream()
-                .collect(Collectors.toMap(e -> e.get("TABLE_NAME"), e -> asList(e.get("COLUMN_NAME")), (e1, e2) -> Stream.concat(e1.stream(), e2.stream()).collect(toList())));
-        Map<String, Set<String>> result = new HashMap<>();
-        for (String table : tables) {
-            Set<String> columns = new LinkedHashSet<>(sourceColumnsByTable.get(table));
-            columns.retainAll(targetColumnsByTable.get(table));
-            columns.remove(null);
-            result.put(table, columns);
+                .collect(Collectors.toMap(e -> e.get("TABLE_NAME"), e -> new HashSet<>(asList(e.get("COLUMN_NAME")).stream().filter(x->x != null).collect(toList())), (e1, e2) -> Stream.concat(e1.stream(), e2.stream()).collect(toSet())));
+        if (targetSchema == null) {
+            return sourceColumnsByTable;
+        } else {
+            Map<String, List<String>> targetColumnsByTable = DatabaseUtil.query(target, "SELECT t.table_name, c.column_name\n" +
+                    "  FROM INFORMATION_SCHEMA.TABLES t\n" +
+                    "  LEFT JOIN INFORMATION_SCHEMA.COLUMNS c on c.table_name = t.table_name and c.table_schema = t.table_schema and c.column_key <> 'PRI'\n" +
+                    "  WHERE t.TABLE_SCHEMA='" + targetSchema + "' and t.table_name in (" + tables.stream().map(DatabaseUtil::toValue).collect(joining(", ")) + ")").stream()
+                    .collect(Collectors.toMap(e -> e.get("TABLE_NAME"), e -> asList(e.get("COLUMN_NAME")), (e1, e2) -> Stream.concat(e1.stream(), e2.stream()).collect(toList())));
+            Map<String, Set<String>> result = new HashMap<>();
+            for (String table : tables) {
+                Set<String> columns = new LinkedHashSet<>(sourceColumnsByTable.get(table));
+                columns.retainAll(targetColumnsByTable.get(table));
+                columns.remove(null);
+                result.put(table, columns);
+            }
+            return result;
         }
-        return result;
     }
 
     public void sync(String sourceSchema, String targetSchema, String outputFile, boolean dryRun, boolean incremental, int maxNumberOfRows) throws SQLException, FileNotFoundException, UnsupportedEncodingException {
+        if (targetSchema == null) {
+            dryRun = true;
+        }
         if (outputFile != null) {
             File f = new File(outputFile);
             if (f.exists() && f.isDirectory()) {
-                outputFile = new File(f, (incremental ? "incr-" :"full-") + sourceSchema + "-" + targetSchema + "-" + new SimpleDateFormat("YYYY-MM-dd-HH-mm-ss-z").format(new Date()) + (anonymizerMap.isEmpty() ? "" : "_anon") + ".sql").getAbsolutePath();
+                outputFile = new File(f, (incremental ? "incr-" :"full-") + sourceSchema + (targetSchema == null ? "" : "-" + targetSchema) + "-" + new SimpleDateFormat("YYYY-MM-dd-HH-mm-ss-z").format(new Date()) + (anonymizerMap.isEmpty() ? "" : "_anon") + ".sql").getAbsolutePath();
             }
         }
         Set<String> tables = determineSyncTables(sourceSchema, targetSchema);

@@ -48,7 +48,6 @@ public class SynchronizerCli {
         options.addOption(source);
 
         Option target = new Option("t", "target", true, "target database");
-        target.setRequired(true);
         options.addOption(target);
 
         Option dryRun = new Option("d", "dry-run", false, "do not perform any changes to the target database");
@@ -86,17 +85,13 @@ public class SynchronizerCli {
             boolean isDryRun = cmd.hasOption(dryRun.getOpt());
             boolean isIncremental = cmd.hasOption(incremental.getOpt());
             String outputFileName = cmd.getOptionValue(outputFile.getOpt());
-            if (outputFileName != null && sourceUrl.equals(targetUrl) && user.equals(tUser) && password.equals(tPassword)) {
-                new DatabaseSynchronizer(dataSource).sync(sourceSchema, targetSchema, isDryRun);
-            } else {
-                DataSource targetDataSource = new MysqlDataSource();
-                ((MysqlDataSource) targetDataSource).setUrl(targetUrl);
-                ((MysqlDataSource) targetDataSource).setUser(tUser);
-                ((MysqlDataSource) targetDataSource).setPassword(tPassword);
-                Map<Pattern, FieldAnonymizer> anonymizers = cmd.hasOption(anonymize.getOpt()) ? FieldAnonymizer.DEFAULT_ANONYMIZERS : Collections.emptyMap();
-                new DataSourceSynchronizer(dataSource, targetDataSource, anonymizers).sync(sourceSchema, targetSchema, outputFileName,
-                        isDryRun, isIncremental, Integer.valueOf(cmd.getOptionValue(maxRowsPerChunk.getOpt(), DEFAULT_MAX_CHUNK_SIZE)));
-            }
+            DataSource targetDataSource = new MysqlDataSource();
+            ((MysqlDataSource) targetDataSource).setUrl(targetUrl);
+            ((MysqlDataSource) targetDataSource).setUser(tUser);
+            ((MysqlDataSource) targetDataSource).setPassword(tPassword);
+            Map<Pattern, FieldAnonymizer> anonymizers = cmd.hasOption(anonymize.getOpt()) ? FieldAnonymizer.DEFAULT_ANONYMIZERS : Collections.emptyMap();
+            new DataSourceSynchronizer(dataSource, targetDataSource, anonymizers).sync(sourceSchema, targetSchema, outputFileName,
+                    isDryRun, isIncremental, Integer.valueOf(cmd.getOptionValue(maxRowsPerChunk.getOpt(), DEFAULT_MAX_CHUNK_SIZE)));
         } catch (ParseException e) {
             LOGGER.severe(e.getMessage());
             formatter.printHelp("Database Synchronizer", options);
