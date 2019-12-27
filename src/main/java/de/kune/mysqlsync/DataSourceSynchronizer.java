@@ -276,8 +276,6 @@ public class DataSourceSynchronizer {
     private Object anonymize(String table, String column, Object value) {
         String cand = table + "." + column;
         return getCachedAnonymizer(cand).map(e -> (Object) e.anonymize(column, value)).orElse(value);
-//        return anonymizerMap.entrySet().stream().filter(e -> e.getKey().matcher(cand).matches()).findFirst().map(e -> (Object) e.getValue().anonymize(column, value)).orElse(value);
-//        return anonymizerMap.entrySet().stream().filter(e -> e.getKey().matcher(cand).matches()).findFirst().map(e -> (Object) e.getValue().anonymize(column, value)).orElse(value);
     }
 
     private void update(PrintWriter writer, Statement stmt, StringBuilder buf, String table, Map<String, Object> row, DatabaseUtil.ResultContext rs, Set<String> primaryKeyColumns) throws SQLException {
