@@ -3,10 +3,7 @@ package de.kune.mysqlsync;
 import de.kune.mysqlsync.anonymizer.FieldAnonymizer;
 
 import javax.sql.DataSource;
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.PrintWriter;
-import java.io.UnsupportedEncodingException;
+import java.io.*;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -18,6 +15,7 @@ import java.util.logging.Logger;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import java.util.zip.GZIPOutputStream;
 
 import static java.lang.String.format;
 import static java.util.Arrays.asList;
@@ -29,15 +27,60 @@ public class DataSourceSynchronizer {
 
     private final DataSource source, target;
     private final Map<Pattern, FieldAnonymizer> anonymizerMap;
+    private final List<Pattern> exclusions;
 
-    public DataSourceSynchronizer(DataSource source, DataSource target, Map<Pattern, FieldAnonymizer> anonymizerMap) {
-        this.anonymizerMap = anonymizerMap;
-        this.source = source;
-        this.target = target;
+    public static class Factory {
+        private DataSource source, target;
+        private Map<Pattern, FieldAnonymizer> anonymizerMap = Collections.emptyMap();
+        private List<Pattern> exclusions = new ArrayList<>();
+
+        public DataSourceSynchronizer build() {
+            return new DataSourceSynchronizer(source, target, anonymizerMap, exclusions);
+        }
+
+        public Factory source(DataSource source) {
+            this.source = source;
+            return this;
+        }
+
+        public Factory target(DataSource target) {
+            this.target = target;
+            return this;
+        }
+
+        public Factory anonymizerMap(Map<Pattern, FieldAnonymizer> anonymizerMap) {
+            this.anonymizerMap = anonymizerMap;
+            return this;
+        }
+
+        public Factory exclusions(List<Pattern> exclusions) {
+            this.exclusions = new ArrayList<>(exclusions);
+            return this;
+        }
+
+        public Factory exclude(Pattern exclusion) {
+            this.exclusions.add(exclusion);
+            return this;
+        }
+
+        public Factory exclude(String exclusionPattern) {
+            this.exclusions.add(Pattern.compile(exclusionPattern));
+            return this;
+        }
     }
 
-    public DataSourceSynchronizer(DataSource source, DataSource target) {
-        this(source, target, Collections.emptyMap());
+    public static Factory builder() {
+        return new Factory();
+    }
+
+    public DataSourceSynchronizer(DataSource source, DataSource target, Map<Pattern, FieldAnonymizer> anonymizerMap, List<Pattern> exclusions) {
+        assert (source != null);
+        assert (anonymizerMap != null);
+        assert (exclusions != null);
+        this.anonymizerMap = new HashMap<>(anonymizerMap);
+        this.source = source;
+        this.target = target;
+        this.exclusions = new ArrayList<>(exclusions);
     }
 
     private static Set<String> determineTables(DataSource dataSource, String schema) throws SQLException {
@@ -91,7 +134,7 @@ public class DataSourceSynchronizer {
                 "  WHERE t.TABLE_SCHEMA='" + sourceSchema + "' and t.table_name in (" + tables.stream().map(DatabaseUtil::toValue).collect(joining(", ")) + ")").stream()
                 .collect(Collectors.toMap(e -> e.get("TABLE_NAME"), e -> new HashSet<>(asList(e.get("COLUMN_NAME")).stream().filter(x->x != null).collect(toList())), (e1, e2) -> Stream.concat(e1.stream(), e2.stream()).collect(toSet())));
         if (targetSchema == null) {
-            return sourceColumnsByTable;
+            return withoutExclusions(sourceColumnsByTable);
         } else {
             Map<String, List<String>> targetColumnsByTable = DatabaseUtil.query(target, "SELECT t.table_name, c.column_name\n" +
                     "  FROM INFORMATION_SCHEMA.TABLES t\n" +
@@ -105,18 +148,26 @@ public class DataSourceSynchronizer {
                 columns.remove(null);
                 result.put(table, columns);
             }
-            return result;
+            return withoutExclusions(result);
         }
     }
 
-    public void sync(String sourceSchema, String targetSchema, String outputFile, boolean dryRun, boolean incremental, int maxNumberOfRows) throws SQLException, FileNotFoundException, UnsupportedEncodingException {
+    private Map<String, Set<String>> withoutExclusions(Map<String, Set<String>> columnsByTable) {
+        return columnsByTable.entrySet().stream()
+                .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue()
+                        .stream()
+                        .filter(f -> !exclusions.stream().anyMatch(x -> x.matcher(e.getKey() + "." + f).matches())).collect(toSet())
+                ));
+    }
+
+    public void sync(String sourceSchema, String targetSchema, String outputFile, boolean compress, boolean dryRun, boolean incremental, int maxNumberOfRows) throws SQLException, IOException {
         if (targetSchema == null) {
             dryRun = true;
         }
         if (outputFile != null) {
             File f = new File(outputFile);
             if (f.exists() && f.isDirectory()) {
-                outputFile = new File(f, (incremental ? "incr-" :"full-") + sourceSchema + (targetSchema == null ? "" : "-" + targetSchema) + "-" + new SimpleDateFormat("YYYY-MM-dd-HH-mm-ss-z").format(new Date()) + (anonymizerMap.isEmpty() ? "" : "_anon") + ".sql").getAbsolutePath();
+                outputFile = new File(f, (incremental ? "incr-" :"full-") + sourceSchema + (targetSchema == null ? "" : "-" + targetSchema) + "-" + new SimpleDateFormat("YYYY-MM-dd-HH-mm-ss-z").format(new Date()) + (anonymizerMap.isEmpty() ? "" : "_anon") + ".sql" + (compress ? ".gz" : "")).getAbsolutePath();
             }
         }
         Set<String> tables = determineSyncTables(sourceSchema, targetSchema);
@@ -131,7 +182,11 @@ public class DataSourceSynchronizer {
             Map<String, Set<String>> columnsByTable = determineSyncColumnsOfSyncTables(sourceSchema, targetSchema, tables);
             LOGGER.info(columnsByTable.toString());
 
-            PrintWriter writer = outputFile == null ? null : new PrintWriter(outputFile, "UTF-8");
+            PrintWriter writer = outputFile == null ? null : new PrintWriter(
+                    new OutputStreamWriter(
+                            compress ? new GZIPOutputStream(new FileOutputStream(outputFile))
+                                    : new FileOutputStream(outputFile), "UTF-8")
+            );
             try (Connection targetConnection = target.getConnection()) {
                 targetConnection.setReadOnly(dryRun);
                 targetConnection.setAutoCommit(false);
@@ -220,7 +275,8 @@ public class DataSourceSynchronizer {
 
     private Object anonymize(String table, String column, Object value) {
         String cand = table + "." + column;
-        return anonymizerMap.entrySet().stream().filter(e -> e.getKey().matcher(cand).matches()).findFirst().map(e -> (Object) e.getValue().anonymize(column, value)).orElse(value);
+        return getCachedAnonymizer(cand).map(e -> (Object) e.anonymize(column, value)).orElse(value);
+//        return anonymizerMap.entrySet().stream().filter(e -> e.getKey().matcher(cand).matches()).findFirst().map(e -> (Object) e.getValue().anonymize(column, value)).orElse(value);
 //        return anonymizerMap.entrySet().stream().filter(e -> e.getKey().matcher(cand).matches()).findFirst().map(e -> (Object) e.getValue().anonymize(column, value)).orElse(value);
     }
 
@@ -331,6 +387,7 @@ public class DataSourceSynchronizer {
     }
 
     private long loadFully(String sourceSchema, String table, Set<String> columns, DatabaseUtil.RowConsumer rowConsumer, int startingRow, int maxNumberOfRows, boolean isFirstChunk) throws SQLException {
+        LOGGER.info("Fetching a maximum of " + maxNumberOfRows + " from " + table + " starting with row " + startingRow);
         return DatabaseUtil.query(source,
                 "SELECT " + columns.stream().map(DatabaseUtil::armor).collect(joining(", "))
                         + " FROM " + DatabaseUtil.armor(sourceSchema) + "." + DatabaseUtil.armor(table)

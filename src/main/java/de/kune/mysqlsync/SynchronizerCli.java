@@ -5,10 +5,10 @@ import de.kune.mysqlsync.anonymizer.FieldAnonymizer;
 import org.apache.commons.cli.*;
 
 import javax.sql.DataSource;
-import java.util.Collections;
-import java.util.Map;
+import java.util.*;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 public class SynchronizerCli {
     private static final Logger LOGGER = Logger.getLogger(SynchronizerCli.class.getName());
@@ -65,6 +65,12 @@ public class SynchronizerCli {
         Option anonymize = new Option("a", "anonymize", false, "anonymize personal data");
         options.addOption(anonymize);
 
+        Option compress = new Option("c", "compress", false, "compress output file (if specified)");
+        options.addOption(compress);
+
+        Option exclusion = new Option("x", "exclude", true, "exclude this pattern");
+        options.addOption(exclusion);
+
         CommandLineParser parser = new DefaultParser();
         HelpFormatter formatter = new HelpFormatter();
         CommandLine cmd;
@@ -89,9 +95,22 @@ public class SynchronizerCli {
             ((MysqlDataSource) targetDataSource).setUrl(targetUrl);
             ((MysqlDataSource) targetDataSource).setUser(tUser);
             ((MysqlDataSource) targetDataSource).setPassword(tPassword);
+            boolean isCompress = cmd.hasOption(compress.getOpt());
             Map<Pattern, FieldAnonymizer> anonymizers = cmd.hasOption(anonymize.getOpt()) ? FieldAnonymizer.DEFAULT_ANONYMIZERS : Collections.emptyMap();
-            new DataSourceSynchronizer(dataSource, targetDataSource, anonymizers).sync(sourceSchema, targetSchema, outputFileName,
-                    isDryRun, isIncremental, Integer.valueOf(cmd.getOptionValue(maxRowsPerChunk.getOpt(), DEFAULT_MAX_CHUNK_SIZE)));
+            List<Pattern> exclusions = Optional.ofNullable(cmd.getOptionValues(exclusion.getOpt())).map(Arrays::stream).map(s -> s.map(Pattern::compile).collect(Collectors.toList())).orElse(Collections.emptyList());
+            DataSourceSynchronizer.builder()
+                    .source(dataSource)
+                    .target(targetDataSource)
+                    .anonymizerMap(anonymizers)
+                    .exclusions(exclusions)
+                    .build()
+                    .sync(sourceSchema,
+                            targetSchema,
+                            outputFileName,
+                            isCompress,
+                            isDryRun,
+                            isIncremental,
+                            Integer.valueOf(cmd.getOptionValue(maxRowsPerChunk.getOpt(), DEFAULT_MAX_CHUNK_SIZE)));
         } catch (ParseException e) {
             LOGGER.severe(e.getMessage());
             formatter.printHelp("Database Synchronizer", options);
