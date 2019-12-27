@@ -22,6 +22,7 @@ public class DataSourceSynchronizerIT {
 
     private static DataSourceSynchronizer synchronizer;
     private static DataSourceSynchronizer anonymizingSynchronzier;
+    private static DataSourceSynchronizer synchronizerWithExclusions;
     private static final String SOURCE_SCHEMA = "test_source_schema";
     private static final String TARGET_SCHEMA = "test_target_schema";
     @ClassRule
@@ -51,6 +52,10 @@ public class DataSourceSynchronizerIT {
 
     private final static Map<String, String> NO_PRIMARY_KEY_REDUCED = new LinkedHashMap<String, String>(NO_PRIMARY_KEY) {{
         remove("customerNumber");
+    }};
+
+    private final static Map<String, String> NO_PRIMARY_KEY_REDUCED_EXCLUDED_FIELDS = new LinkedHashMap<String, String>(NO_PRIMARY_KEY_REDUCED) {{
+        put("emailAddress", "");
     }};
 
     private final static Map<String, String> NO_PRIMARY_KEY_UPDATED = new LinkedHashMap<String, String>(NO_PRIMARY_KEY) {{
@@ -84,6 +89,11 @@ public class DataSourceSynchronizerIT {
         remove("uuid");
     }};
 
+    private final static Map<String, String> CUSTOMER_REDUCED_EXCLUDED_FIELDS = new LinkedHashMap<String, String>(CUSTOMER_REDUCED) {{
+        put("emailAddress", "");
+        put("gender", null);
+    }};
+
     private final static Map<String, String> CUSTOMER_UPDATED = new LinkedHashMap<String, String>(CUSTOMER) {{
         put("lastModifiedDate", "2019-07-12 10:59:28");
         put("emailAddress", "someone@somewhereelse.com");
@@ -92,10 +102,13 @@ public class DataSourceSynchronizerIT {
 
     @BeforeClass
     public static void beforeClass() throws IOException {
-        synchronizer = new DataSourceSynchronizer(dataSource(sourceDatabase), dataSource(targetDatabase));
-        anonymizingSynchronzier = new DataSourceSynchronizer(dataSource(sourceDatabase), dataSource(targetDatabase),
-                DEFAULT_ANONYMIZERS
-        );
+        synchronizer = DataSourceSynchronizer.builder().source(dataSource(sourceDatabase)).target(dataSource(targetDatabase)).build();
+        anonymizingSynchronzier = DataSourceSynchronizer.builder().source(dataSource(sourceDatabase)).target(dataSource(targetDatabase)).anonymizerMap(
+                DEFAULT_ANONYMIZERS).build();
+        synchronizerWithExclusions = DataSourceSynchronizer.builder().source(dataSource(sourceDatabase)).target(dataSource(targetDatabase))
+                .exclude(".*\\.emailAddress")
+                .exclude(".*\\.gender")
+                .build();
     }
 
     @Before
@@ -105,84 +118,94 @@ public class DataSourceSynchronizerIT {
     }
 
     @Test
-    public void synchronize_empty_schema() throws FileNotFoundException, UnsupportedEncodingException, SQLException {
-        synchronizer.sync(SOURCE_SCHEMA, TARGET_SCHEMA, null, false, false, 50);
+    public void synchronize_empty_schema() throws IOException, SQLException {
+        synchronizer.sync(SOURCE_SCHEMA, TARGET_SCHEMA, null, false, false, false, 50);
     }
 
     @Test
-    public void synchronize_empty_table() throws MalformedURLException, FileNotFoundException, UnsupportedEncodingException, SQLException {
+    public void synchronize_empty_table() throws IOException, SQLException {
         init(sourceDatabase, SOURCE_SCHEMA, "create_schema");
         init(targetDatabase, TARGET_SCHEMA, "create_schema");
-        synchronizer.sync(SOURCE_SCHEMA, TARGET_SCHEMA, null, false, false, 50);
+        synchronizer.sync(SOURCE_SCHEMA, TARGET_SCHEMA, null, false, false, false, 50);
         assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "customer")).isEmpty();
     }
 
     @Test
-    public void synchronize() throws MalformedURLException, FileNotFoundException, UnsupportedEncodingException, SQLException {
+    public void synchronize() throws IOException, SQLException {
         init(sourceDatabase, SOURCE_SCHEMA, "create_schema", "insert");
         init(targetDatabase, TARGET_SCHEMA, "create_schema");
-        synchronizer.sync(SOURCE_SCHEMA, TARGET_SCHEMA, null, false, false, 50);
+        synchronizer.sync(SOURCE_SCHEMA, TARGET_SCHEMA, null, false, false, false, 50);
         assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "customer")).containsOnlyOnce(CUSTOMER);
         assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "no_primary_key")).containsOnlyOnce(NO_PRIMARY_KEY);
         assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "only_primary_key")).containsOnlyOnce(ONLY_PRIMARY_KEY);
     }
 
     @Test
-    public void synchronizeAnonymized() throws MalformedURLException, FileNotFoundException, UnsupportedEncodingException, SQLException {
+    public void synchronizeAnonymized() throws IOException, SQLException {
         init(sourceDatabase, SOURCE_SCHEMA, "create_schema", "insert");
         init(targetDatabase, TARGET_SCHEMA, "create_schema");
-        anonymizingSynchronzier.sync(SOURCE_SCHEMA, TARGET_SCHEMA, null, false, false, 50);
+        anonymizingSynchronzier.sync(SOURCE_SCHEMA, TARGET_SCHEMA, null, false, false, false, 50);
         assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "customer")).containsOnlyOnce(CUSTOMER_ANONYMIZED);
         assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "no_primary_key")).containsOnlyOnce(NO_PRIMARY_KEY_ANONYMIZED);
         assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "only_primary_key")).containsOnlyOnce(ONLY_PRIMARY_KEY_ANONYMIZED);
     }
 
     @Test
-    public void updateFullSync() throws MalformedURLException, FileNotFoundException, UnsupportedEncodingException, SQLException {
+    public void updateFullSync() throws IOException, SQLException {
         init(sourceDatabase, SOURCE_SCHEMA, "create_schema", "insert");
         init(targetDatabase, TARGET_SCHEMA, "create_schema");
-        synchronizer.sync(SOURCE_SCHEMA, TARGET_SCHEMA, null, false, false, 50);
+        synchronizer.sync(SOURCE_SCHEMA, TARGET_SCHEMA, null, false, false, false, 50);
         assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "customer")).containsOnlyOnce(CUSTOMER);
         assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "no_primary_key")).containsOnlyOnce(NO_PRIMARY_KEY);
         assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "only_primary_key")).containsOnlyOnce(ONLY_PRIMARY_KEY);
         init(sourceDatabase, SOURCE_SCHEMA, "create_schema", "insert", "update");
-        synchronizer.sync(SOURCE_SCHEMA, TARGET_SCHEMA, null, false, false, 50);
+        synchronizer.sync(SOURCE_SCHEMA, TARGET_SCHEMA, null, false, false, false, 50);
         assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "customer")).containsOnlyOnce(CUSTOMER_UPDATED);
         assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "no_primary_key")).containsOnlyOnce(NO_PRIMARY_KEY_UPDATED);
         assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "only_primary_key")).containsOnlyOnce(ONLY_PRIMARY_KEY);
     }
 
     @Test
-    public void updateIncrementalSync() throws MalformedURLException, FileNotFoundException, UnsupportedEncodingException, SQLException {
+    public void updateIncrementalSync() throws IOException, SQLException {
         init(sourceDatabase, SOURCE_SCHEMA, "create_schema", "insert");
         init(targetDatabase, TARGET_SCHEMA, "create_schema");
-        synchronizer.sync(SOURCE_SCHEMA, TARGET_SCHEMA, null, false, false, 50);
+        synchronizer.sync(SOURCE_SCHEMA, TARGET_SCHEMA, null, false, false, false, 50);
         assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "customer")).containsOnlyOnce(CUSTOMER);
         assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "no_primary_key")).containsOnlyOnce(NO_PRIMARY_KEY);
         assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "only_primary_key")).containsOnlyOnce(ONLY_PRIMARY_KEY);
         run(sourceDatabase, SOURCE_SCHEMA, "update");
-        synchronizer.sync(SOURCE_SCHEMA, TARGET_SCHEMA, null, false, true, 50);
+        synchronizer.sync(SOURCE_SCHEMA, TARGET_SCHEMA, null, false, false, true, 50);
         assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "customer")).containsOnlyOnce(CUSTOMER_UPDATED);
         assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "no_primary_key")).containsOnlyOnce(NO_PRIMARY_KEY_UPDATED);
         assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "only_primary_key")).containsOnlyOnce(ONLY_PRIMARY_KEY);
     }
 
     @Test
-    public void synchronize_reduced_fields() throws MalformedURLException, FileNotFoundException, UnsupportedEncodingException, SQLException {
+    public void synchronize_reduced_fields() throws IOException, SQLException {
         init(sourceDatabase, SOURCE_SCHEMA, "create_schema", "insert");
         init(targetDatabase, TARGET_SCHEMA, "create_reduced_schema");
-        synchronizer.sync(SOURCE_SCHEMA, TARGET_SCHEMA, null, false, false, 50);
+        synchronizer.sync(SOURCE_SCHEMA, TARGET_SCHEMA, null, false, false, false, 50);
         assertThat(queryAll(sourceDatabase, SOURCE_SCHEMA, "customer")).containsOnlyOnce(CUSTOMER);
         assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "customer")).containsOnlyOnce(CUSTOMER_REDUCED);
         assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "no_primary_key")).containsOnlyOnce(NO_PRIMARY_KEY_REDUCED);
     }
 
     @Test
-    public void synchronize_empty_table_reduced_fields() throws MalformedURLException, FileNotFoundException, UnsupportedEncodingException, SQLException {
+    public void synchronize_empty_table_reduced_fields() throws IOException, SQLException {
         init(sourceDatabase, SOURCE_SCHEMA, "create_schema");
         init(targetDatabase, TARGET_SCHEMA, "create_reduced_schema");
-        synchronizer.sync(SOURCE_SCHEMA, TARGET_SCHEMA, null, false, false, 50);
+        synchronizer.sync(SOURCE_SCHEMA, TARGET_SCHEMA, null, false, false, false, 50);
         assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "customer")).isEmpty();
+    }
+
+    @Test
+    public void synchronize_reduced_fields_with_exclusions() throws IOException, SQLException {
+        init(sourceDatabase, SOURCE_SCHEMA, "create_schema", "insert");
+        init(targetDatabase, TARGET_SCHEMA, "create_reduced_schema");
+        synchronizerWithExclusions.sync(SOURCE_SCHEMA, TARGET_SCHEMA, null, false, false, false, 50);
+        assertThat(queryAll(sourceDatabase, SOURCE_SCHEMA, "customer")).containsOnlyOnce(CUSTOMER);
+        assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "customer")).containsOnlyOnce(CUSTOMER_REDUCED_EXCLUDED_FIELDS);
+        assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "no_primary_key")).containsOnlyOnce(NO_PRIMARY_KEY_REDUCED_EXCLUDED_FIELDS);
     }
 
 }
