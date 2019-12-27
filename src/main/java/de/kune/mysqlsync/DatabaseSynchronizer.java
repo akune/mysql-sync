@@ -12,6 +12,7 @@ import static java.lang.String.format;
 /**
  * Provides functionality to synchronize data between similar schemas in the same database management system.
  */
+@Deprecated
 public class DatabaseSynchronizer {
 
     private static final Logger LOGGER = Logger.getLogger(DatabaseSynchronizer.class.getName());
