@@ -21,6 +21,7 @@ public class SynchronizerCli {
         options.addOption(hostname);
 
         Option port = new Option("P", "port", true, "database port");
+        port.setType(Number.class);
         options.addOption(port);
 
         Option user = new Option("u", "user", true, "database user");
@@ -76,10 +77,10 @@ public class SynchronizerCli {
         CommandLine cmd;
         try {
             cmd = parser.parse(options, args);
-            String sourceUrl = "jdbc:mysql://"+cmd.getOptionValue(hostname.getOpt())+":"+cmd.getOptionValue(port.getOpt(), "3306")+"?useUnicode=true&characterEncoding=utf-8&verifyServerCertificate=false&useSSL=false&requireSSL=false";
+            String sourceUrl = "jdbc:mysql://"+cmd.getOptionValue(hostname.getOpt())+":"+Optional.ofNullable(cmd.getParsedOptionValue(port.getOpt())).orElse("3306")+"?useUnicode=true&characterEncoding=utf-8&verifyServerCertificate=false&useSSL=false&requireSSL=false";
             String sourceUser = cmd.getOptionValue(user.getOpt());
             String sourcePassword = cmd.getOptionValue(password.getOpt());
-            String targetUrl = "jdbc:mysql://"+cmd.getOptionValue(targetHostname.getOpt(), cmd.getOptionValue(hostname.getOpt()))+":"+cmd.getOptionValue(targetPort.getOpt(), cmd.getOptionValue(port.getOpt(), "3306"))+"?useUnicode=true&characterEncoding=utf-8&verifyServerCertificate=false&useSSL=false&requireSSL=false";
+            String targetUrl = "jdbc:mysql://"+cmd.getOptionValue(targetHostname.getOpt(), cmd.getOptionValue(hostname.getOpt()))+":"+Optional.ofNullable(cmd.getParsedOptionValue(targetPort.getOpt())).orElse(cmd.getOptionValue(port.getOpt(), "3306"))+"?useUnicode=true&characterEncoding=utf-8&verifyServerCertificate=false&useSSL=false&requireSSL=false";
             String tUser = cmd.getOptionValue(targetUser.getOpt(), cmd.getOptionValue(user.getOpt()));
             String tPassword = cmd.getOptionValue(targetPassword.getOpt(), cmd.getOptionValue(password.getOpt()));
             DataSource dataSource = new MysqlDataSource();
