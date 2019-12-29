@@ -5,8 +5,10 @@ import de.kune.mysqlsync.anonymizer.FieldAnonymizer;
 import org.apache.commons.cli.*;
 
 import javax.sql.DataSource;
+import java.io.File;
 import java.util.*;
 import java.util.logging.Logger;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -72,46 +74,76 @@ public class SynchronizerCli {
         Option exclusion = new Option("x", "exclude", true, "exclude this pattern");
         options.addOption(exclusion);
 
+        Option jumpHost = new Option("J", "jump-host", true, "the SSH user name and jump host to connect the source database");
+        options.addOption(jumpHost);
+
+        Option identityFile = new Option("I", "identity-file", true, "the SSH id_rsa file to authenticate with the jump host");
+        options.addOption(identityFile);
+
         CommandLineParser parser = new DefaultParser();
         HelpFormatter formatter = new HelpFormatter();
         CommandLine cmd;
         try {
             cmd = parser.parse(options, args);
-            String sourceUrl = "jdbc:mysql://"+cmd.getOptionValue(hostname.getOpt())+":"+Optional.ofNullable(cmd.getParsedOptionValue(port.getOpt())).orElse("3306")+"?useUnicode=true&characterEncoding=utf-8&verifyServerCertificate=false&useSSL=false&requireSSL=false";
-            String sourceUser = cmd.getOptionValue(user.getOpt());
-            String sourcePassword = cmd.getOptionValue(password.getOpt());
-            String targetUrl = "jdbc:mysql://"+cmd.getOptionValue(targetHostname.getOpt(), cmd.getOptionValue(hostname.getOpt()))+":"+Optional.ofNullable(cmd.getParsedOptionValue(targetPort.getOpt())).orElse(cmd.getOptionValue(port.getOpt(), "3306"))+"?useUnicode=true&characterEncoding=utf-8&verifyServerCertificate=false&useSSL=false&requireSSL=false";
-            String tUser = cmd.getOptionValue(targetUser.getOpt(), cmd.getOptionValue(user.getOpt()));
-            String tPassword = cmd.getOptionValue(targetPassword.getOpt(), cmd.getOptionValue(password.getOpt()));
-            DataSource dataSource = new MysqlDataSource();
-            ((MysqlDataSource) dataSource).setUrl(sourceUrl);
-            ((MysqlDataSource) dataSource).setUser(sourceUser);
-            ((MysqlDataSource) dataSource).setPassword(sourcePassword);
-            String sourceSchema = cmd.getOptionValue(source.getOpt());
-            String targetSchema = cmd.getOptionValue(target.getOpt());
-            boolean isDryRun = cmd.hasOption(dryRun.getOpt());
-            boolean isIncremental = cmd.hasOption(incremental.getOpt());
-            String outputFileName = cmd.getOptionValue(outputFile.getOpt());
-            DataSource targetDataSource = new MysqlDataSource();
-            ((MysqlDataSource) targetDataSource).setUrl(targetUrl);
-            ((MysqlDataSource) targetDataSource).setUser(tUser);
-            ((MysqlDataSource) targetDataSource).setPassword(tPassword);
-            boolean isCompress = cmd.hasOption(compress.getOpt());
-            Map<Pattern, FieldAnonymizer> anonymizers = cmd.hasOption(anonymize.getOpt()) ? FieldAnonymizer.DEFAULT_ANONYMIZERS : Collections.emptyMap();
-            List<Pattern> exclusions = Optional.ofNullable(cmd.getOptionValues(exclusion.getOpt())).map(Arrays::stream).map(s -> s.map(Pattern::compile).collect(Collectors.toList())).orElse(Collections.emptyList());
-            DataSourceSynchronizer.builder()
-                    .source(dataSource)
-                    .target(targetDataSource)
-                    .anonymizerMap(anonymizers)
-                    .exclusions(exclusions)
-                    .build()
-                    .sync(sourceSchema,
-                            targetSchema,
-                            outputFileName,
-                            isCompress,
-                            isDryRun,
-                            isIncremental,
-                            Integer.valueOf(cmd.getOptionValue(maxRowsPerChunk.getOpt(), DEFAULT_MAX_CHUNK_SIZE)));
+
+            DataSourceFactory sourceDSF = null;
+            try {
+                if (cmd.getOptionValue(jumpHost.getOpt()) != null) {
+                    Pattern userPattern = Pattern.compile("^((.*?)@)?(.*?)(:(.*))?$");
+                    Matcher userMatcher = userPattern.matcher(cmd.getOptionValue(jumpHost.getOpt()));
+                    userMatcher.matches();
+                    sourceDSF = DataSourceFactory.tunneled().jumpHost(userMatcher.group(3));
+                    if (userMatcher.group(2) != null) {
+                        ((DataSourceFactory.TunneledDataSourceFactory) sourceDSF).userAtJumpHost(userMatcher.group(2));
+                    }
+                    if (userMatcher.group(5) != null) {
+                        ((DataSourceFactory.TunneledDataSourceFactory) sourceDSF).jumpHostPort(Integer.parseInt(userMatcher.group(5)));
+                    }
+                    if (cmd.getOptionValue(identityFile.getOpt()) != null) {
+                        ((DataSourceFactory.TunneledDataSourceFactory) sourceDSF).identityFile(new File(cmd.getOptionValue(identityFile.getOpt())));
+                    }
+                } else {
+                    sourceDSF = DataSourceFactory.simple();
+                }
+                sourceDSF.hostname(cmd.getOptionValue(hostname.getOpt()));
+                sourceDSF.port(Optional.ofNullable((int) (long) cmd.getParsedOptionValue(port.getOpt())).orElse(3306));
+                sourceDSF.user(cmd.getOptionValue(user.getOpt()));
+                sourceDSF.password(cmd.getOptionValue(password.getOpt()));
+                DataSource dataSource = sourceDSF.build();
+
+                String targetUrl = "jdbc:mysql://" + cmd.getOptionValue(targetHostname.getOpt(), cmd.getOptionValue(hostname.getOpt())) + ":" + Optional.ofNullable(cmd.getParsedOptionValue(targetPort.getOpt())).orElse(cmd.getOptionValue(port.getOpt(), "3306")) + "?useUnicode=true&characterEncoding=utf-8&verifyServerCertificate=false&useSSL=false&requireSSL=false";
+                String tUser = cmd.getOptionValue(targetUser.getOpt(), cmd.getOptionValue(user.getOpt()));
+                String tPassword = cmd.getOptionValue(targetPassword.getOpt(), cmd.getOptionValue(password.getOpt()));
+                String sourceSchema = cmd.getOptionValue(source.getOpt());
+                String targetSchema = cmd.getOptionValue(target.getOpt());
+                boolean isDryRun = cmd.hasOption(dryRun.getOpt());
+                boolean isIncremental = cmd.hasOption(incremental.getOpt());
+                String outputFileName = cmd.getOptionValue(outputFile.getOpt());
+                DataSource targetDataSource = new MysqlDataSource();
+                ((MysqlDataSource) targetDataSource).setUrl(targetUrl);
+                ((MysqlDataSource) targetDataSource).setUser(tUser);
+                ((MysqlDataSource) targetDataSource).setPassword(tPassword);
+                boolean isCompress = cmd.hasOption(compress.getOpt());
+                Map<Pattern, FieldAnonymizer> anonymizers = cmd.hasOption(anonymize.getOpt()) ? FieldAnonymizer.DEFAULT_ANONYMIZERS : Collections.emptyMap();
+                List<Pattern> exclusions = Optional.ofNullable(cmd.getOptionValues(exclusion.getOpt())).map(Arrays::stream).map(s -> s.map(Pattern::compile).collect(Collectors.toList())).orElse(Collections.emptyList());
+                DataSourceSynchronizer.builder()
+                        .source(dataSource)
+                        .target(targetDataSource)
+                        .anonymizerMap(anonymizers)
+                        .exclusions(exclusions)
+                        .build()
+                        .sync(sourceSchema,
+                                targetSchema,
+                                outputFileName,
+                                isCompress,
+                                isDryRun,
+                                isIncremental,
+                                Integer.valueOf(cmd.getOptionValue(maxRowsPerChunk.getOpt(), DEFAULT_MAX_CHUNK_SIZE)));
+            } catch (Exception e) {
+                LOGGER.severe(e.getMessage());
+            } finally {
+                if (sourceDSF != null) {sourceDSF.close();}
+            }
         } catch (ParseException e) {
             LOGGER.severe(e.getMessage());
             formatter.printHelp("Database Synchronizer", options);

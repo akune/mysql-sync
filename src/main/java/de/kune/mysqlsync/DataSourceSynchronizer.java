@@ -187,9 +187,11 @@ public class DataSourceSynchronizer {
                             compress ? new GZIPOutputStream(new FileOutputStream(outputFile))
                                     : new FileOutputStream(outputFile), "UTF-8")
             );
-            try (Connection targetConnection = target.getConnection()) {
-                targetConnection.setReadOnly(dryRun);
-                targetConnection.setAutoCommit(false);
+            try (Connection targetConnection = dryRun ? null : target.getConnection()) {
+                if (!dryRun) {
+                    targetConnection.setReadOnly(dryRun);
+                    targetConnection.setAutoCommit(false);
+                }
                 Statement stmt = dryRun ? null : targetConnection.createStatement();
                 if (!dryRun) {
                     stmt.executeQuery("USE " + DatabaseUtil.armor(targetSchema));
