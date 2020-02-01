@@ -7,6 +7,7 @@ import org.apache.commons.cli.*;
 import javax.sql.DataSource;
 import java.io.File;
 import java.util.*;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -80,6 +81,12 @@ public class SynchronizerCli {
         Option identityFile = new Option("I", "identity-file", true, "the SSH id_rsa file to authenticate with the jump host");
         options.addOption(identityFile);
 
+        Option splitByTable = new Option("S", "split-by-table", false, "split by table");
+        options.addOption(splitByTable);
+
+        Option dropAndRecreateTables = new Option("D", "drop-and-recreate-tables", false, "drop and recreate tables");
+        options.addOption(dropAndRecreateTables);
+
         CommandLineParser parser = new DefaultParser();
         HelpFormatter formatter = new HelpFormatter();
         CommandLine cmd;
@@ -124,6 +131,8 @@ public class SynchronizerCli {
                 ((MysqlDataSource) targetDataSource).setUser(tUser);
                 ((MysqlDataSource) targetDataSource).setPassword(tPassword);
                 boolean isCompress = cmd.hasOption(compress.getOpt());
+                boolean isSplitByTable = cmd.hasOption(splitByTable.getOpt());
+                boolean isDropAndRecreateTables = cmd.hasOption(dropAndRecreateTables.getOpt());
                 Map<Pattern, FieldAnonymizer> anonymizers = cmd.hasOption(anonymize.getOpt()) ? FieldAnonymizer.DEFAULT_ANONYMIZERS : Collections.emptyMap();
                 List<Pattern> exclusions = Optional.ofNullable(cmd.getOptionValues(exclusion.getOpt())).map(Arrays::stream).map(s -> s.map(Pattern::compile).collect(Collectors.toList())).orElse(Collections.emptyList());
                 DataSourceSynchronizer.builder()
@@ -136,11 +145,13 @@ public class SynchronizerCli {
                                 targetSchema,
                                 outputFileName,
                                 isCompress,
+                                isSplitByTable,
+                                isDropAndRecreateTables,
                                 isDryRun,
                                 isIncremental,
                                 Integer.valueOf(cmd.getOptionValue(maxRowsPerChunk.getOpt(), DEFAULT_MAX_CHUNK_SIZE)));
             } catch (Exception e) {
-                LOGGER.severe(e.getMessage());
+                LOGGER.log(Level.SEVERE, "", e);
             } finally {
                 if (sourceDSF != null) {sourceDSF.close();}
             }

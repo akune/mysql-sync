@@ -11,6 +11,7 @@ import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.function.Consumer;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -28,6 +29,7 @@ public class DataSourceSynchronizer {
     private final DataSource source, target;
     private final Map<Pattern, FieldAnonymizer> anonymizerMap;
     private final List<Pattern> exclusions;
+    private Date creationDate = new Date();
 
     public static class Factory {
         private DataSource source, target;
@@ -160,16 +162,11 @@ public class DataSourceSynchronizer {
                 ));
     }
 
-    public void sync(String sourceSchema, String targetSchema, String outputFile, boolean compress, boolean dryRun, boolean incremental, int maxNumberOfRows) throws SQLException, IOException {
+    public void sync(String sourceSchema, String targetSchema, String outputFileInput, boolean compress, boolean splitByTable, boolean dropAndRecreateTables, boolean dryRun, boolean incremental, int maxNumberOfRows) throws SQLException, IOException {
         if (targetSchema == null) {
             dryRun = true;
         }
-        if (outputFile != null) {
-            File f = new File(outputFile);
-            if (f.exists() && f.isDirectory()) {
-                outputFile = new File(f, (incremental ? "incr-" :"full-") + sourceSchema + (targetSchema == null ? "" : "-" + targetSchema) + "-" + new SimpleDateFormat("YYYY-MM-dd-HH-mm-ss-z").format(new Date()) + (anonymizerMap.isEmpty() ? "" : "_anon") + ".sql" + (compress ? ".gz" : "")).getAbsolutePath();
-            }
-        }
+        String outputFile = outputFile(sourceSchema, targetSchema, outputFileInput, compress, incremental, null);
         Set<String> tables = determineSyncTables(sourceSchema, targetSchema);
         LOGGER.info(format("Starting synchronization for source schema: %s", sourceSchema));
         LOGGER.info(format("Configured chunk size is: %d", maxNumberOfRows));
@@ -182,11 +179,7 @@ public class DataSourceSynchronizer {
             Map<String, Set<String>> columnsByTable = determineSyncColumnsOfSyncTables(sourceSchema, targetSchema, tables);
             LOGGER.info(columnsByTable.toString());
 
-            PrintWriter writer = outputFile == null ? null : new PrintWriter(
-                    new OutputStreamWriter(
-                            compress ? new GZIPOutputStream(new FileOutputStream(outputFile))
-                                    : new FileOutputStream(outputFile), "UTF-8")
-            );
+            PrintWriter oneWriter = splitByTable ? null : openWriter(outputFile, compress);
             try (Connection targetConnection = dryRun ? null : target.getConnection()) {
                 if (!dryRun) {
                     targetConnection.setReadOnly(dryRun);
@@ -197,54 +190,137 @@ public class DataSourceSynchronizer {
                     stmt.executeQuery("USE " + DatabaseUtil.armor(targetSchema));
                 }
 
-                StringBuilder buf = new StringBuilder();
+                final StringBuilder buf = new StringBuilder();
 
-                executeAndWriteLn("-- -----------------------------------------------------------------", null, writer, null);
-                executeAndWriteLn("/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;", stmt, writer, buf);
-                executeAndWriteLn("/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;", stmt, writer, buf);
-                executeAndWriteLn("/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;", stmt, writer, buf);
-                executeAndWriteLn("/*!40101 SET NAMES utf8 */;", stmt, writer, buf);
-                executeAndWriteLn("SET NAMES utf8mb4;", stmt, writer, buf);
-                executeAndWriteLn("/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;", stmt, writer, buf);
-                executeAndWriteLn("/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;", stmt, writer, buf);
-                executeAndWriteLn("/*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;", stmt, writer, buf);
-                executeAndWriteLn("-- -----------------------------------------------------------------", null, writer, null);
+                if (!splitByTable) {
+                    writeHeader(stmt, oneWriter, buf);
+                }
 
-                tables.stream().sorted().forEachOrdered(table -> {
-                    Set<String> columns = new LinkedHashSet<>();
-                    columns.addAll(primaryKeyByTable.get(table));
-                    columns.addAll(columnsByTable.get(table));
-                    LOGGER.info("Synchronizing " + table);
-                    try {
-                        if (incremental) {
-                            loadIncrementally(sourceSchema, targetSchema, table, primaryKeyByTable.get(table), columns,
-                                    fullLoadRowConsumer(writer, stmt, buf, table, columns),
-                                    incrementalNewRowConsumer(writer, stmt, buf, table, columns),
-                                    incrementalUpdateRowConsumer(writer, stmt, buf, table, columns, primaryKeyByTable.get(table)), maxNumberOfRows);
-                        } else {
-                            processTable(sourceSchema, table, columns, fullLoadRowConsumer(writer, stmt, buf, table, columns), maxNumberOfRows);
-                        }
-                    } catch (SQLException e) {
-                        throw new RuntimeException(e);
-                    }
-                });
+                if (splitByTable) {
+                    tables.stream().parallel().forEach(
+                            synchronizeTable(sourceSchema, targetSchema, outputFileInput, compress, splitByTable, dropAndRecreateTables, incremental, maxNumberOfRows, primaryKeyByTable, columnsByTable, oneWriter, stmt, buf));
+                } else {
+                    tables.stream().sorted().forEachOrdered(synchronizeTable(sourceSchema, targetSchema, outputFileInput, compress, splitByTable, dropAndRecreateTables, incremental, maxNumberOfRows, primaryKeyByTable, columnsByTable, oneWriter, stmt, buf));
+                }
 
-                executeAndWriteLn("-- -----------------------------------------------------------------", null, writer, null);
-                executeAndWriteLn("/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;", null, writer, null);
-                executeAndWriteLn("/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;", null, writer, null);
-                executeAndWriteLn("/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;", null, writer, null);
-                executeAndWriteLn("/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;", null, writer, null);
-                executeAndWriteLn("/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;", null, writer, null);
-                executeAndWriteLn("/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;", null, writer, null);
-                executeAndWriteLn("-- -----------------------------------------------------------------", null, writer, null);
-
-                if (writer != null) {
-                    writer.flush();
-                    writer.close();
+                if (!splitByTable) {
+                    writeFooter(stmt, oneWriter, buf);
+                    closeWriter(oneWriter);
                 }
             }
         }
         LOGGER.info(format("Finished synchronization for source schema: %s", sourceSchema));
+    }
+
+    private Consumer<String> synchronizeTable(String sourceSchema, String targetSchema, String outputFileInput, boolean compress, boolean splitByTable, boolean dropAndRecreateTables, boolean incremental, int maxNumberOfRows, Map<String, Set<String>> primaryKeyByTable, Map<String, Set<String>> columnsByTable, PrintWriter oneWriter, Statement stmt, StringBuilder buf) {
+        return table -> {
+    Set<String> columns = new LinkedHashSet<>();
+    columns.addAll(primaryKeyByTable.get(table));
+    columns.addAll(columnsByTable.get(table));
+    LOGGER.info("Synchronizing " + table);
+    try {
+        PrintWriter writer;
+        StringBuilder localBuf = buf;
+        if (splitByTable) {
+            localBuf = new StringBuilder();
+            writer = openWriter(outputFile(sourceSchema, targetSchema, outputFileInput, compress, incremental, table), compress);
+            writeHeader(stmt, writer, localBuf);
+        } else {
+            writer = oneWriter;
+        }
+        if (incremental) {
+            loadIncrementally(sourceSchema, targetSchema, table, primaryKeyByTable.get(table), columns,
+                    fullLoadRowConsumer(writer, stmt, localBuf, table, columns),
+                    incrementalNewRowConsumer(writer, stmt, localBuf, table, columns),
+                    incrementalUpdateRowConsumer(writer, stmt, localBuf, table, columns, primaryKeyByTable.get(table)), maxNumberOfRows);
+        } else {
+            if (dropAndRecreateTables) {
+                dropAndRecreateTable(writer, stmt, localBuf, sourceSchema, targetSchema, table);
+            }
+            processTable(sourceSchema, table, columns, fullLoadRowConsumer(writer, stmt, localBuf, table, columns), maxNumberOfRows);
+        }
+        if (splitByTable) {
+            writeFooter(stmt, writer, localBuf);
+            closeWriter(writer);
+        }
+    } catch (SQLException e) {
+        throw new RuntimeException(e);
+    }
+};
+    }
+
+    private void dropAndRecreateTable(PrintWriter writer, Statement stmt, StringBuilder localBuf, String sourceSchema, String targetSchema, String table) throws SQLException {
+        String createTable = DatabaseUtil.query(targetSchema == null ? source : target, "show create table " + (targetSchema == null ? sourceSchema : targetSchema) + "." + table).get(0).get("Create Table");
+        executeAndWriteLn("drop table if exists " + table + ";", stmt, writer, localBuf);
+        executeAndWriteLn(createTable + ";", stmt, writer, localBuf);
+    }
+
+
+    private String outputFile(String sourceSchema, String targetSchema, String outputFileInput, boolean compress, boolean incremental, String table) {
+        if (outputFileInput == null) {
+            return null;
+        }
+        String outputFile = null;
+        if (outputFileInput != null) {
+            File f = new File(outputFileInput);
+            if (f.exists() && f.isDirectory()) {
+                outputFile = new File(f, (incremental ? "incr-" : "full-") + sourceSchema + (targetSchema == null ? "" : "-" + targetSchema) + "-" + new SimpleDateFormat("YYYY-MM-dd-HH-mm-ss-z").format(creationDate) + (anonymizerMap.isEmpty() ? "" : "_anon") + (table == null ? extension(compress) : "")).getAbsolutePath();
+            }
+        }
+        if (table == null) {
+            new File(outputFile).getParentFile().mkdirs();
+            return outputFile;
+        } else {
+            new File(new File(outputFile), table).getParentFile().mkdirs();
+            return new File(new File(outputFile), table + extension(compress)).getAbsolutePath();
+        }
+    }
+
+    private String extension(boolean compress) {
+        return ".sql" + (compress ? ".gz" : "");
+    }
+
+    private void closeWriter(PrintWriter writer) {
+        if (writer != null) {
+            writer.flush();
+            writer.close();
+        }
+    }
+
+    private PrintWriter openWriter(String outputFile, boolean compress) {
+        try {
+            return outputFile == null ? null : new PrintWriter(
+                    new OutputStreamWriter(
+                            compress ? new GZIPOutputStream(new FileOutputStream(outputFile))
+                                    : new FileOutputStream(outputFile), "UTF-8")
+            );
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void writeFooter(Statement stmt, PrintWriter writer, StringBuilder buf) throws SQLException {
+        executeAndWriteLn("-- -----------------------------------------------------------------", null, writer, null);
+        executeAndWriteLn("/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;", null, writer, null);
+        executeAndWriteLn("/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;", null, writer, null);
+        executeAndWriteLn("/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;", null, writer, null);
+        executeAndWriteLn("/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;", null, writer, null);
+        executeAndWriteLn("/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;", null, writer, null);
+        executeAndWriteLn("/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;", null, writer, null);
+        executeAndWriteLn("-- -----------------------------------------------------------------", null, writer, null);
+    }
+
+    private void writeHeader(Statement stmt, PrintWriter writer, StringBuilder buf) throws SQLException {
+        executeAndWriteLn("-- -----------------------------------------------------------------", null, writer, null);
+        executeAndWriteLn("/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;", stmt, writer, buf);
+        executeAndWriteLn("/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;", stmt, writer, buf);
+        executeAndWriteLn("/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;", stmt, writer, buf);
+        executeAndWriteLn("/*!40101 SET NAMES utf8 */;", stmt, writer, buf);
+        executeAndWriteLn("SET NAMES utf8mb4;", stmt, writer, buf);
+        executeAndWriteLn("/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;", stmt, writer, buf);
+        executeAndWriteLn("/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;", stmt, writer, buf);
+        executeAndWriteLn("/*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;", stmt, writer, buf);
+        executeAndWriteLn("-- -----------------------------------------------------------------", null, writer, null);
     }
 
 
