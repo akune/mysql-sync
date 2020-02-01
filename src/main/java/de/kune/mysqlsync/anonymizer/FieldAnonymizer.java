@@ -50,7 +50,7 @@ public interface FieldAnonymizer {
     FieldAnonymizer STREET = (k, v) -> hash(STREETS, v);
     FieldAnonymizer STREET_NUMBER = (k, v) -> hash(STREET_NUMBERS, v);
     FieldAnonymizer PHONE = (k, v) -> "+" + hash(v);
-    FieldAnonymizer POST_CODE = (k, v) -> Long.toString(Math.abs(hashNumber(v)) % 100000);
+    FieldAnonymizer POST_CODE = (k, v) -> v == null ? null : Long.toString(Math.abs(hashNumber(v)) % 100000);
     FieldAnonymizer IBAN = (k, v) -> {
         if (v == null) {
             return null;
