@@ -24,8 +24,8 @@ public interface FieldAnonymizer {
     List<String> STREET_NUMBERS = IntStream.range(1, 180).boxed().map(i->Integer.toString(i)).collect(toList());
 
 
-    FieldAnonymizer DEFAULT = (k, v) -> hash(v);
-    FieldAnonymizer DEFAULT_RETAIN_LENGTH = (k, v) -> trimToSameLength(hash(v), v);
+    FieldAnonymizer DEFAULT = (k, v, c) -> hash(v);
+    FieldAnonymizer DEFAULT_RETAIN_LENGTH = (k, v, c) -> trimToSameLength(hash(v), v);
 
     static String trimToSameLength(String hash, Object k) {
         if (hash == null) {
@@ -43,15 +43,15 @@ public interface FieldAnonymizer {
         return hash;
     }
 
-    FieldAnonymizer CITY = (k, v) -> hash(CITIES, v);
-    FieldAnonymizer FIRST_NAME = (k, v) -> hash(FIRST_NAMES, v);
-    FieldAnonymizer LAST_NAME = (k, v) -> hash(LAST_NAMES, v);
-    FieldAnonymizer LAST_NAME_FIRST_NAME = (k, v) -> LAST_NAME.anonymize(k, v) + ", " + FIRST_NAME.anonymize(k, v);
-    FieldAnonymizer STREET = (k, v) -> hash(STREETS, v);
-    FieldAnonymizer STREET_NUMBER = (k, v) -> hash(STREET_NUMBERS, v);
-    FieldAnonymizer PHONE = (k, v) -> "+" + hash(v);
-    FieldAnonymizer POST_CODE = (k, v) -> v == null ? null : Long.toString(Math.abs(hashNumber(v)) % 100000);
-    FieldAnonymizer IBAN = (k, v) -> {
+    FieldAnonymizer CITY = (k, v, c) -> hash(CITIES, v);
+    FieldAnonymizer FIRST_NAME = (k, v, c) -> hash(FIRST_NAMES, v);
+    FieldAnonymizer LAST_NAME = (k, v, c) -> hash(LAST_NAMES, v);
+    FieldAnonymizer LAST_NAME_FIRST_NAME = (k, v, c) -> LAST_NAME.anonymize(k, v, c) + ", " + FIRST_NAME.anonymize(k, v, c);
+    FieldAnonymizer STREET = (k, v, c) -> hash(STREETS, v);
+    FieldAnonymizer STREET_NUMBER = (k, v, c) -> hash(STREET_NUMBERS, v);
+    FieldAnonymizer PHONE = (k, v, c) -> "+" + hash(v);
+    FieldAnonymizer POST_CODE = (k, v, c) -> v == null ? null : Long.toString(Math.abs(hashNumber(v)) % 100000);
+    FieldAnonymizer IBAN = (k, v, c) -> {
         if (v == null) {
             return null;
         }
@@ -88,7 +88,7 @@ public interface FieldAnonymizer {
         put(Pattern.compile("^.*?\\.iban$"), IBAN);
     }};
 
-    String anonymize(String key, Object value);
+    String anonymize(String key, Object value,  Map<String, Object> context);
 
     static String hash(Object input) {
         if (input == null) {

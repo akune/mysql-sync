@@ -6,10 +6,7 @@ import org.junit.ClassRule;
 import org.junit.Test;
 import org.testcontainers.containers.MySQLContainer;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.UnsupportedEncodingException;
-import java.net.MalformedURLException;
 import java.sql.SQLException;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -63,6 +60,11 @@ public class DataSourceSynchronizerIT {
         put("emailAddress", "someone@somewhereelse.com");
     }};
 
+    private final static Map<String, String> NO_PRIMARY_KEY_UPDATED_ANONYMIZED = new LinkedHashMap<String, String>(NO_PRIMARY_KEY_ANONYMIZED) {{
+        put("lastModifiedDate", "2019-07-12 10:59:30");
+        put("emailAddress", "8229633782615946672");
+    }};
+
     private final static Map<String, String> CUSTOMER = new LinkedHashMap<String, String>() {{
         put("id", "1");
         put("creationDate", "2019-07-12 10:52:11");
@@ -97,6 +99,12 @@ public class DataSourceSynchronizerIT {
     private final static Map<String, String> CUSTOMER_UPDATED = new LinkedHashMap<String, String>(CUSTOMER) {{
         put("lastModifiedDate", "2019-07-12 10:59:28");
         put("emailAddress", "someone@somewhereelse.com");
+        put("newsletter", "1");
+    }};
+
+    private final static Map<String, String> CUSTOMER_UPDATED_ANONYMIZED = new LinkedHashMap<String, String>(CUSTOMER_ANONYMIZED) {{
+        put("lastModifiedDate", "2019-07-12 10:59:28");
+        put("emailAddress", "8229633782615946672");
         put("newsletter", "1");
     }};
 
@@ -178,6 +186,21 @@ public class DataSourceSynchronizerIT {
         assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "customer")).containsOnlyOnce(CUSTOMER_UPDATED);
         assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "no_primary_key")).containsOnlyOnce(NO_PRIMARY_KEY_UPDATED);
         assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "only_primary_key")).containsOnlyOnce(ONLY_PRIMARY_KEY);
+    }
+
+    @Test
+    public void updateIncrementalSyncAnonymized() throws IOException, SQLException {
+        init(sourceDatabase, SOURCE_SCHEMA, "create_schema", "insert");
+        init(targetDatabase, TARGET_SCHEMA, "create_schema");
+        anonymizingSynchronzier.sync(SOURCE_SCHEMA, TARGET_SCHEMA, null, false, false, false, false, false, 50);
+        assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "customer")).containsOnlyOnce(CUSTOMER_ANONYMIZED);
+        assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "no_primary_key")).containsOnlyOnce(NO_PRIMARY_KEY_ANONYMIZED);
+        assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "only_primary_key")).containsOnlyOnce(ONLY_PRIMARY_KEY_ANONYMIZED);
+        run(sourceDatabase, SOURCE_SCHEMA, "update");
+        anonymizingSynchronzier.sync(SOURCE_SCHEMA, TARGET_SCHEMA, null, false, false, false, false, true, 50);
+        assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "customer")).containsOnlyOnce(CUSTOMER_UPDATED_ANONYMIZED);
+        assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "no_primary_key")).containsOnlyOnce(NO_PRIMARY_KEY_UPDATED_ANONYMIZED);
+        assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "only_primary_key")).containsOnlyOnce(ONLY_PRIMARY_KEY_ANONYMIZED);
     }
 
     @Test

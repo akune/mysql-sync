@@ -351,14 +351,14 @@ public class DataSourceSynchronizer {
         return cachedAnonymizers.computeIfAbsent(cand, c ->anonymizerMap.entrySet().stream().filter(e -> e.getKey().matcher(c).matches()).findFirst().map(e -> e.getValue()));
     }
 
-    private Object anonymize(String table, String column, Object value) {
+    private Object anonymize(String table, String column, Object value, Map<String, Object> row) {
         String cand = table + "." + column;
-        return getCachedAnonymizer(cand).map(e -> (Object) e.anonymize(column, value)).orElse(value);
+        return getCachedAnonymizer(cand).map(e -> (Object) e.anonymize(column, value, row)).orElse(value);
     }
 
     private void update(PrintWriter writer, Statement stmt, StringBuilder buf, String table, Map<String, Object> row, DatabaseUtil.ResultContext rs, Set<String> primaryKeyColumns) throws SQLException {
         executeAndWriteLn("UPDATE " + DatabaseUtil.armor(table)
-                + " SET " + row.entrySet().stream().filter(e -> !primaryKeyColumns.contains(e.getKey())).map(e -> DatabaseUtil.armor(e.getKey()) + "=" + DatabaseUtil.toValue(anonymize(table, e.getKey(), e.getValue()))).collect(joining(","))
+                + " SET " + row.entrySet().stream().filter(e -> !primaryKeyColumns.contains(e.getKey())).map(e -> DatabaseUtil.armor(e.getKey()) + "=" + DatabaseUtil.toValue(anonymize(table, e.getKey(), e.getValue(), row))).collect(joining(","))
                 + " WHERE " + primaryKeyColumns.stream().map(primaryKeyColumn->DatabaseUtil.armor(primaryKeyColumn) + "=" + DatabaseUtil.toValue(row.get(primaryKeyColumn))).collect(joining(" AND ")) + ";", stmt, writer, buf);
     }
 
@@ -371,7 +371,7 @@ public class DataSourceSynchronizer {
 
         }
         executeAndWrite("  (" + row.entrySet().stream()
-                .map(e->anonymize(table, e.getKey(), e.getValue()))
+                .map(e->anonymize(table, e.getKey(), e.getValue(), row))
                 .map(DatabaseUtil::toValue)
                 .collect(joining(",")) + ")", stmt, writer, buf);
         if (rs.isLastRow()) {
