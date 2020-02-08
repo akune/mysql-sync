@@ -1,6 +1,8 @@
 name: Update Semver
 on:
   push:
+    branches: 
+      - 'master'
     branches-ignore:
       - '**'
     tags:
