@@ -27,3 +27,13 @@ CREATE TABLE `no_primary_key` (
                                 `customerNumber` varchar(255) NOT NULL,
                                 `emailAddress` varchar(255) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+CREATE TABLE `user` (
+                                `id` bigint(20) NOT NULL AUTO_INCREMENT,
+                                `creationDate` datetime DEFAULT NULL,
+                                `lastModifiedDate` datetime DEFAULT NULL,
+                                `username` varchar(255) DEFAULT NULL,
+                                `customerId` bigint(20),
+                                PRIMARY KEY (`id`),
+                                UNIQUE KEY `uk_user_username` (`username`),
+                                CONSTRAINT `FK_USER_CUSTOMER` FOREIGN KEY (`customerId`) REFERENCES `customer` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
