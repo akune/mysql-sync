@@ -2,6 +2,8 @@
 name: Release
 
 on:
+  push:
+    branches: master
   pull_request:
     types: closed
 
@@ -13,5 +15,6 @@ jobs:
         uses: K-Phoen/semver-release-action@master
         with:
           release_branch: master
+          tag_format: '%major%.%minor%.%patch%'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
