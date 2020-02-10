@@ -31,11 +31,4 @@ public class GenericAnonymizer implements FieldAnonymizer {
         return x;
     }
 
-    public static void main(String[] args) {
-        GenericAnonymizer anon = new GenericAnonymizer("start${key1}middle${key1}middle${key2}end");
-        System.out.println(anon.anonymize("none", "", new HashMap<String, Object>() {{
-            this.put("key1", "value1");
-            this.put("key2", 15);
-        }}));
-    }
 }

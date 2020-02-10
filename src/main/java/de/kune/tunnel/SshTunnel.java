@@ -61,11 +61,4 @@ public class SshTunnel implements AutoCloseable {
         }
     }
 
-    public static void main(String[] args) {
-        try (SshTunnel tunnel = new SshTunnel("ansible", "job1.prod.report.deposit", 22, "localhost", 3306, new File("./id_rsa"))) {
-            System.out.println(tunnel);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
 }
