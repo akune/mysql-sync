@@ -39,3 +39,12 @@ insert into only_primary_key (
     564232,
     'someone@somewhere.com'
 );
+insert into `user` (
+    `creationDate`,
+    `username`,
+    `customerId`
+) values (
+     '2019-07-12 10:52:11',
+    'hans.hansen',
+    1
+);

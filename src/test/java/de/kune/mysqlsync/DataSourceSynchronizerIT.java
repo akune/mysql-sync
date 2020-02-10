@@ -1,5 +1,6 @@
 package de.kune.mysqlsync;
 
+import de.kune.mysqlsync.anonymizer.FieldAnonymizer;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
@@ -8,8 +9,10 @@ import org.testcontainers.containers.MySQLContainer;
 
 import java.io.IOException;
 import java.sql.SQLException;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import static de.kune.mysqlsync.TestUtil.*;
 import static de.kune.mysqlsync.anonymizer.FieldAnonymizer.DEFAULT_ANONYMIZERS;
@@ -65,6 +68,18 @@ public class DataSourceSynchronizerIT {
         put("emailAddress", "8229633782615946672");
     }};
 
+    private final static Map<String, String> USER = new LinkedHashMap<String, String>() {{
+        put("id", "1");
+        put("creationDate", "2019-07-12 10:52:11");
+        put("lastModifiedDate", null);
+        put("username", "hans.hansen");
+        put("customerId", "1");
+    }};
+
+    private final static Map<String, String> USER_ANONYMIZED = new LinkedHashMap<String, String>(USER) {{
+        put("username", "user-1");
+    }};
+
     private final static Map<String, String> CUSTOMER = new LinkedHashMap<String, String>() {{
         put("id", "1");
         put("creationDate", "2019-07-12 10:52:11");
@@ -112,11 +127,17 @@ public class DataSourceSynchronizerIT {
     public static void beforeClass() throws IOException {
         synchronizer = DataSourceSynchronizer.builder().source(dataSource(sourceDatabase)).target(dataSource(targetDatabase)).build();
         anonymizingSynchronzier = DataSourceSynchronizer.builder().source(dataSource(sourceDatabase)).target(dataSource(targetDatabase)).anonymizerMap(
-                DEFAULT_ANONYMIZERS).build();
+                anonymizers()).build();
         synchronizerWithExclusions = DataSourceSynchronizer.builder().source(dataSource(sourceDatabase)).target(dataSource(targetDatabase))
                 .exclude(".*\\.emailAddress")
                 .exclude(".*\\.gender")
                 .build();
+    }
+
+    private static Map<Pattern, FieldAnonymizer> anonymizers() {
+        Map<Pattern, FieldAnonymizer> anonymizerMap = new HashMap<>(DEFAULT_ANONYMIZERS);
+        anonymizerMap.put(Pattern.compile("^user\\.username$"), FieldAnonymizer.findByName("generic(user-${id})"));
+        return anonymizerMap;
     }
 
     @Before
@@ -156,6 +177,7 @@ public class DataSourceSynchronizerIT {
         assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "customer")).containsOnlyOnce(CUSTOMER_ANONYMIZED);
         assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "no_primary_key")).containsOnlyOnce(NO_PRIMARY_KEY_ANONYMIZED);
         assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "only_primary_key")).containsOnlyOnce(ONLY_PRIMARY_KEY_ANONYMIZED);
+        assertThat(queryAll(targetDatabase, TARGET_SCHEMA, "user")).containsOnlyOnce(USER_ANONYMIZED);
     }
 
     @Test

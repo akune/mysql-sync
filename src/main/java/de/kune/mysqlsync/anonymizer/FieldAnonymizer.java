@@ -5,6 +5,7 @@ import java.nio.charset.Charset;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.*;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -101,6 +102,11 @@ public interface FieldAnonymizer {
             case "iban": return IBAN;
             case "defaultretainlength": return DEFAULT_RETAIN_LENGTH;
             case "default": return DEFAULT;
+        }
+        final Pattern GENERIC_ANONYMIZER_PATTERN = Pattern.compile("generic\\((?<expr>.*?)\\)");
+        Matcher matcher = GENERIC_ANONYMIZER_PATTERN.matcher(anonymizer);
+        if (matcher.find()) {
+            return new GenericAnonymizer(matcher.group("expr"));
         }
         throw new IllegalArgumentException("Unknown anonymizer " + anonymizer);
     }
