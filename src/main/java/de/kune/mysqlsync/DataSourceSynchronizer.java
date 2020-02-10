@@ -265,6 +265,8 @@ public class DataSourceSynchronizer {
             File f = new File(outputFileInput);
             if (f.exists() && f.isDirectory()) {
                 outputFile = new File(f, (incremental ? "incr-" : "full-") + sourceSchema + (targetSchema == null ? "" : "-" + targetSchema) + "-" + new SimpleDateFormat("YYYY-MM-dd-HH-mm-ss-z").format(creationDate) + (anonymizerMap.isEmpty() ? "" : "_anon") + (table == null ? extension(compress) : "")).getAbsolutePath();
+            } else {
+                outputFile = outputFileInput;
             }
         }
         if (table == null) {

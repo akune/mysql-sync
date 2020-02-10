@@ -66,7 +66,8 @@ public class SynchronizerCli {
         Option maxRowsPerChunk = new Option("r", "max-rows-per-chunk", true, "the max number of rows to be retrieved from DB in one chunk");
         options.addOption(maxRowsPerChunk);
         
-        Option anonymize = new Option("a", "anonymize", false, "anonymize personal data");
+        Option anonymize = new Option("a", "anonymize", true, "anonymize personal data");
+        anonymize.setRequired(false);
         options.addOption(anonymize);
 
         Option compress = new Option("c", "compress", false, "compress output file (if specified)");
@@ -133,7 +134,14 @@ public class SynchronizerCli {
                 boolean isCompress = cmd.hasOption(compress.getOpt());
                 boolean isSplitByTable = cmd.hasOption(splitByTable.getOpt());
                 boolean isDropAndRecreateTables = cmd.hasOption(dropAndRecreateTables.getOpt());
-                Map<Pattern, FieldAnonymizer> anonymizers = cmd.hasOption(anonymize.getOpt()) ? FieldAnonymizer.DEFAULT_ANONYMIZERS : Collections.emptyMap();
+                Map<Pattern, FieldAnonymizer> anonymizers = Collections.emptyMap();
+                if (cmd.hasOption(anonymize.getOpt())) {
+                    if (cmd.getOptionValues(anonymize.getOpt()).length == 0) {
+                        anonymizers =  FieldAnonymizer.DEFAULT_ANONYMIZERS;
+                    } else {
+                        anonymizers = buildAnonymizers(cmd.getOptionValues(anonymize.getOpt()));
+                    }
+                }
                 List<Pattern> exclusions = Optional.ofNullable(cmd.getOptionValues(exclusion.getOpt())).map(Arrays::stream).map(s -> s.map(Pattern::compile).collect(Collectors.toList())).orElse(Collections.emptyList());
                 DataSourceSynchronizer.builder()
                         .source(dataSource)
@@ -163,4 +171,22 @@ public class SynchronizerCli {
         }
 
     }
+
+    private static Map<Pattern, FieldAnonymizer> buildAnonymizers(String[] anonymizers) {
+        Map<Pattern, FieldAnonymizer> result = new HashMap<>();
+        for (String a: anonymizers) {
+            Matcher matcher = Pattern.compile("^\\/(?<regexp>.*)\\/:(?<anonymizer>.*)$")
+                    .matcher(a);
+            if (!matcher.find()) {
+                throw new IllegalArgumentException();
+            }
+            result.put(Pattern.compile(matcher.group("regexp")), buildAnonymizer(matcher.group("anonymizer")));
+        }
+        return result;
+    }
+
+    private static FieldAnonymizer buildAnonymizer(String anonymizer) {
+        return FieldAnonymizer.findByName(anonymizer);
+    }
+
 }

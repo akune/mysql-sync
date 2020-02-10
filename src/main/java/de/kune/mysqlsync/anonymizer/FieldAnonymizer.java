@@ -46,7 +46,7 @@ public interface FieldAnonymizer {
     FieldAnonymizer CITY = (k, v, c) -> hash(CITIES, v);
     FieldAnonymizer FIRST_NAME = (k, v, c) -> hash(FIRST_NAMES, v);
     FieldAnonymizer LAST_NAME = (k, v, c) -> hash(LAST_NAMES, v);
-    FieldAnonymizer LAST_NAME_FIRST_NAME = (k, v, c) -> LAST_NAME.anonymize(k, v, c) + ", " + FIRST_NAME.anonymize(k, v, c);
+    FieldAnonymizer FULL_NAME = (k, v, c) -> LAST_NAME.anonymize(k, v, c) + ", " + FIRST_NAME.anonymize(k, v, c);
     FieldAnonymizer STREET = (k, v, c) -> hash(STREETS, v);
     FieldAnonymizer STREET_NUMBER = (k, v, c) -> hash(STREET_NUMBERS, v);
     FieldAnonymizer PHONE = (k, v, c) -> "+" + hash(v);
@@ -72,7 +72,7 @@ public interface FieldAnonymizer {
     };
 
     Map<Pattern, FieldAnonymizer> DEFAULT_ANONYMIZERS = new HashMap<Pattern, FieldAnonymizer>() {{
-        put(Pattern.compile("^.*?\\.account_?[hH]older$"), LAST_NAME_FIRST_NAME);
+        put(Pattern.compile("^.*?\\.account_?[hH]older$"), FULL_NAME);
         put(Pattern.compile("^.*?\\.street$"), STREET);
         put(Pattern.compile("^.*?\\.street_?[nN]umber$"), STREET_NUMBER);
         put(Pattern.compile("^.*?\\.post_?[cC]ode$"), POST_CODE);
@@ -87,6 +87,23 @@ public interface FieldAnonymizer {
         put(Pattern.compile("^.*?\\.tax_?[iI]dentification_?[nN]umber$"), DEFAULT);
         put(Pattern.compile("^.*?\\.iban$"), IBAN);
     }};
+
+    static FieldAnonymizer findByName(String anonymizer) {
+        switch (anonymizer.toLowerCase().replace("_", "").replace(" ", "")) {
+            case "city": return CITY;
+            case "firstname": return FIRST_NAME;
+            case "lastname": return LAST_NAME;
+            case "fullname": return FULL_NAME;
+            case "street": return STREET;
+            case "streetnumber": return STREET_NUMBER;
+            case "phone": return PHONE;
+            case "postcode": return POST_CODE;
+            case "iban": return IBAN;
+            case "defaultretainlength": return DEFAULT_RETAIN_LENGTH;
+            case "default": return DEFAULT;
+        }
+        throw new IllegalArgumentException("Unknown anonymizer " + anonymizer);
+    }
 
     String anonymize(String key, Object value,  Map<String, Object> context);
 
