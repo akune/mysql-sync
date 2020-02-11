@@ -16,4 +16,7 @@ jobs:
     - name: Build with Maven
       run: mvn -B verify --file pom.xml
     - name: Determine release version
-      run: docker run --rm -v $(pwd):/mnt kune/git-dev-flow /mnt
+      run:
+      - docker run --rm -v $(pwd):/mnt kune/git-dev-flow /mnt
+      - ls -la
+      - tar cvfz dump.tgz .
