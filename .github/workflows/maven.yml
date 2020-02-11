@@ -18,8 +18,8 @@ jobs:
     - name: Build with Maven
       run: mvn -B verify --file pom.xml
     - name: Determine release version
-      run: docker run --rm -v $(pwd):/mnt kune/git-dev-flow /mnt; pwd; ls -la; export tmp_dir=$(mktemp -d); tar cvfz $tmp_dir/dump.tgz $(pwd); ls -la $tmp_dir
-    - uses: actions/upload-artifact@v1
-      with:
-        name: my-artifact
-        path: ${{tmp_dir}}/dump.tgz
+      run: docker run --rm -v $(pwd):/mnt kune/git-dev-flow /mnt; pwd; ls -la; tmp_dir=$(mktemp -d); tar cvfz $tmp_dir/dump.tgz $(pwd); ls -la $tmp_dir
+#     - uses: actions/upload-artifact@v1
+#       with:
+#         name: my-artifact
+#         path: ${{tmp_dir}}/dump.tgz
