@@ -112,6 +112,21 @@
                     <target>8</target>
                 </configuration>
             </plugin>
+            <plugin>
+                <groupId>com.google.cloud.tools</groupId>
+                <artifactId>jib-maven-plugin</artifactId>
+                <version>2.0.0</version>
+                <configuration>
+                    <to>
+                        <image>kune/${project.artifactId}</image>
+                        <tags>${env.TAG}</tags>
+                        <auth>
+                            <username>${env.DOCKER_HUB_USER}</username>
+                            <password>${env.DOCKER_HUB_PASSWORD}</password>
+                        </auth>
+                    </to>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
 

@@ -12,6 +12,11 @@ jobs:
         fetch-depth: '0'
     - name: Bump version and push tag
       uses: anothrNick/github-tag-action@1.13.0
+      id: tag
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         WITH_V: false
+    - name: Build Docker Image
+      env:
+        TAG: ${{ steps.tag.new_tag }}
+      run: mvn verify jib:build
