@@ -19,6 +19,6 @@ jobs:
     - name: Build Docker Image
       env:
         TAG: ${{ steps.tag.new_tag }}
-        DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USER }}
+        DOCKER_HUB_USER: ${{ secrets.DOCKER_HUB_USER }}
         DOCKER_HUB_PASSWORD: ${{ secrets.DOCKER_HUB_PASSWORD }}
       run: mvn verify jib:build
