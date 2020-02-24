@@ -88,6 +88,9 @@ public class SynchronizerCli {
         Option dropAndRecreateTables = new Option("D", "drop-and-recreate-tables", false, "drop and recreate tables");
         options.addOption(dropAndRecreateTables);
 
+        Option allowParallel = new Option("mt", "multi-threaded", false, "allows to synchronize multiple tables in parallel if split-by-table was specified");
+        options.addOption(allowParallel);
+
         CommandLineParser parser = new DefaultParser();
         HelpFormatter formatter = new HelpFormatter();
         CommandLine cmd;
@@ -157,7 +160,7 @@ public class SynchronizerCli {
                                 isDropAndRecreateTables,
                                 isDryRun,
                                 isIncremental,
-                                Integer.valueOf(cmd.getOptionValue(maxRowsPerChunk.getOpt(), DEFAULT_MAX_CHUNK_SIZE)));
+                                cmd.hasOption(allowParallel.getOpt()), Integer.valueOf(cmd.getOptionValue(maxRowsPerChunk.getOpt(), DEFAULT_MAX_CHUNK_SIZE)));
             } catch (Exception e) {
                 LOGGER.log(Level.SEVERE, "", e);
             } finally {

@@ -163,7 +163,7 @@ public class DataSourceSynchronizer {
                 ));
     }
 
-    public void sync(String sourceSchema, String targetSchema, String outputFileInput, boolean compress, boolean splitByTable, boolean dropAndRecreateTables, boolean dryRun, boolean incremental, int maxNumberOfRows) throws SQLException, IOException {
+    public void sync(String sourceSchema, String targetSchema, String outputFileInput, boolean compress, boolean splitByTable, boolean dropAndRecreateTables, boolean dryRun, boolean incremental, boolean allowParallel, int maxNumberOfRows) throws SQLException, IOException {
         if (targetSchema == null) {
             dryRun = true;
         }
@@ -197,7 +197,7 @@ public class DataSourceSynchronizer {
                     writeHeader(stmt, oneWriter, buf);
                 }
 
-                if (splitByTable) {
+                if (splitByTable && allowParallel) {
                     tables.stream().parallel().forEach(
                             synchronizeTable(sourceSchema, targetSchema, outputFileInput, compress, splitByTable, dropAndRecreateTables, incremental, maxNumberOfRows, primaryKeyByTable, columnsByTable, oneWriter, stmt, buf));
                 } else {
@@ -223,7 +223,7 @@ public class DataSourceSynchronizer {
         PrintWriter writer;
         StringBuilder localBuf = buf;
         if (splitByTable) {
-            localBuf = new StringBuilder();
+            localBuf = targetSchema == null ? null : new StringBuilder();
             writer = openWriter(outputFile(sourceSchema, targetSchema, outputFileInput, compress, incremental, table), compress);
             writeHeader(stmt, writer, localBuf);
         } else {
