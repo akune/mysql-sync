@@ -13,6 +13,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import static de.kune.mysqlsync.anonymizer.FieldAnonymizer.buildAnonymizers;
+
 public class SynchronizerCli {
     private static final Logger LOGGER = Logger.getLogger(SynchronizerCli.class.getName());
     public static final String DEFAULT_MAX_CHUNK_SIZE = "500000";
@@ -173,23 +175,6 @@ public class SynchronizerCli {
             System.exit(1);
         }
 
-    }
-
-    private static Map<Pattern, FieldAnonymizer> buildAnonymizers(String[] anonymizers) {
-        Map<Pattern, FieldAnonymizer> result = new LinkedHashMap<>();
-        for (String a: anonymizers) {
-            Matcher matcher = Pattern.compile("^\\/(?<regexp>.*)\\/:(?<anonymizer>.*)$")
-                    .matcher(a);
-            if (!matcher.find()) {
-                throw new IllegalArgumentException();
-            }
-            result.put(Pattern.compile(matcher.group("regexp")), buildAnonymizer(matcher.group("anonymizer")));
-        }
-        return result;
-    }
-
-    private static FieldAnonymizer buildAnonymizer(String anonymizer) {
-        return FieldAnonymizer.findByName(anonymizer);
     }
 
 }

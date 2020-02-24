@@ -89,6 +89,19 @@ public interface FieldAnonymizer {
         put(Pattern.compile("^.*?\\.iban$"), IBAN);
     }};
 
+    static Map<Pattern, FieldAnonymizer> buildAnonymizers(String[] anonymizers) {
+        Map<Pattern, FieldAnonymizer> result = new LinkedHashMap<>();
+        for (String a: anonymizers) {
+            Matcher matcher = Pattern.compile("^\\/(?<regexp>.*)\\/:(?<anonymizer>.*)$")
+                    .matcher(a);
+            if (!matcher.find()) {
+                throw new IllegalArgumentException();
+            }
+            result.put(Pattern.compile(matcher.group("regexp")), FieldAnonymizer.findByName(matcher.group("anonymizer")));
+        }
+        return result;
+    }
+
     static FieldAnonymizer findByName(String anonymizer) {
         switch (anonymizer.toLowerCase().replace("_", "").replace(" ", "")) {
             case "city": return CITY;

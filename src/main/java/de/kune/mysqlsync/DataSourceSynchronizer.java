@@ -10,7 +10,6 @@ import java.sql.Statement;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.function.Consumer;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
@@ -79,7 +78,7 @@ public class DataSourceSynchronizer {
         assert (source != null);
         assert (anonymizerMap != null);
         assert (exclusions != null);
-        this.anonymizerMap = new HashMap<>(anonymizerMap);
+        this.anonymizerMap = new LinkedHashMap<>(anonymizerMap);
         this.source = source;
         this.target = target;
         this.exclusions = new ArrayList<>(exclusions);
@@ -135,7 +134,7 @@ public class DataSourceSynchronizer {
                 "  FROM INFORMATION_SCHEMA.TABLES t\n" +
                 "  LEFT JOIN INFORMATION_SCHEMA.COLUMNS c on c.table_name = t.table_name and c.table_schema = t.table_schema and c.column_key <> 'PRI'\n" +
                 "  WHERE t.TABLE_SCHEMA='" + sourceSchema + "' and t.table_name in (" + tables.stream().map(DatabaseUtil::toValue).collect(joining(", ")) + ")").stream()
-                .collect(Collectors.toMap(e -> e.get("TABLE_NAME"), e -> new HashSet<>(asList(e.get("COLUMN_NAME")).stream().filter(x->x != null).collect(toList())), (e1, e2) -> Stream.concat(e1.stream(), e2.stream()).collect(toSet())));
+                .collect(Collectors.toMap(e -> e.get("TABLE_NAME"), e -> new HashSet<>(asList(e.get("COLUMN_NAME")).stream().filter(x -> x != null).collect(toList())), (e1, e2) -> Stream.concat(e1.stream(), e2.stream()).collect(toSet())));
         if (targetSchema == null) {
             return withoutExclusions(sourceColumnsByTable);
         } else {
@@ -215,39 +214,39 @@ public class DataSourceSynchronizer {
 
     private Consumer<String> synchronizeTable(String sourceSchema, String targetSchema, String outputFileInput, boolean compress, boolean splitByTable, boolean dropAndRecreateTables, boolean incremental, int maxNumberOfRows, Map<String, Set<String>> primaryKeyByTable, Map<String, Set<String>> columnsByTable, PrintWriter oneWriter, Statement stmt, StringBuilder buf) {
         return table -> {
-    Set<String> columns = new LinkedHashSet<>();
-    columns.addAll(primaryKeyByTable.get(table));
-    columns.addAll(columnsByTable.get(table));
-    LOGGER.info("Synchronizing " + table);
-    try {
-        PrintWriter writer;
-        StringBuilder localBuf = buf;
-        if (splitByTable) {
-            localBuf = targetSchema == null ? null : new StringBuilder();
-            writer = openWriter(outputFile(sourceSchema, targetSchema, outputFileInput, compress, incremental, table), compress);
-            writeHeader(stmt, writer, localBuf);
-        } else {
-            writer = oneWriter;
-        }
-        if (incremental) {
-            loadIncrementally(sourceSchema, targetSchema, table, primaryKeyByTable.get(table), columns,
-                    fullLoadRowConsumer(writer, stmt, localBuf, table, columns),
-                    incrementalNewRowConsumer(writer, stmt, localBuf, table, columns),
-                    incrementalUpdateRowConsumer(writer, stmt, localBuf, table, columns, primaryKeyByTable.get(table)), maxNumberOfRows);
-        } else {
-            if (dropAndRecreateTables) {
-                dropAndRecreateTable(writer, stmt, localBuf, sourceSchema, targetSchema, table);
+            Set<String> columns = new LinkedHashSet<>();
+            columns.addAll(primaryKeyByTable.get(table));
+            columns.addAll(columnsByTable.get(table));
+            LOGGER.info("Synchronizing " + table);
+            try {
+                PrintWriter writer;
+                StringBuilder localBuf = buf;
+                if (splitByTable) {
+                    localBuf = targetSchema == null ? null : new StringBuilder();
+                    writer = openWriter(outputFile(sourceSchema, targetSchema, outputFileInput, compress, incremental, table), compress);
+                    writeHeader(stmt, writer, localBuf);
+                } else {
+                    writer = oneWriter;
+                }
+                if (incremental) {
+                    loadIncrementally(sourceSchema, targetSchema, table, primaryKeyByTable.get(table), columns,
+                            fullLoadRowConsumer(writer, stmt, localBuf, table, columns),
+                            incrementalNewRowConsumer(writer, stmt, localBuf, table, columns),
+                            incrementalUpdateRowConsumer(writer, stmt, localBuf, table, columns, primaryKeyByTable.get(table)), maxNumberOfRows);
+                } else {
+                    if (dropAndRecreateTables) {
+                        dropAndRecreateTable(writer, stmt, localBuf, sourceSchema, targetSchema, table);
+                    }
+                    processTable(sourceSchema, table, columns, fullLoadRowConsumer(writer, stmt, localBuf, table, columns), maxNumberOfRows);
+                }
+                if (splitByTable) {
+                    writeFooter(stmt, writer, localBuf);
+                    closeWriter(writer);
+                }
+            } catch (SQLException e) {
+                throw new RuntimeException(e);
             }
-            processTable(sourceSchema, table, columns, fullLoadRowConsumer(writer, stmt, localBuf, table, columns), maxNumberOfRows);
-        }
-        if (splitByTable) {
-            writeFooter(stmt, writer, localBuf);
-            closeWriter(writer);
-        }
-    } catch (SQLException e) {
-        throw new RuntimeException(e);
-    }
-};
+        };
     }
 
     private void dropAndRecreateTable(PrintWriter writer, Statement stmt, StringBuilder localBuf, String sourceSchema, String targetSchema, String table) throws SQLException {
@@ -348,7 +347,7 @@ public class DataSourceSynchronizer {
         }
     }
 
-    private ConcurrentMap<String, Optional<FieldAnonymizer>> cachedAnonymizers = new ConcurrentHashMap<>();
+    private Map<String, Optional<FieldAnonymizer>> cachedAnonymizers = new ConcurrentHashMap<>();
 
     private Optional<FieldAnonymizer> getCachedAnonymizer(String cand) {
         return cachedAnonymizers.computeIfAbsent(cand, c -> determineAnonymizer(c));
@@ -368,7 +367,7 @@ public class DataSourceSynchronizer {
     private void update(PrintWriter writer, Statement stmt, StringBuilder buf, String table, Map<String, Object> row, DatabaseUtil.ResultContext rs, Set<String> primaryKeyColumns) throws SQLException {
         executeAndWriteLn("UPDATE " + DatabaseUtil.armor(table)
                 + " SET " + row.entrySet().stream().filter(e -> !primaryKeyColumns.contains(e.getKey())).map(e -> DatabaseUtil.armor(e.getKey()) + "=" + DatabaseUtil.toValue(anonymize(table, e.getKey(), e.getValue(), row))).collect(joining(","))
-                + " WHERE " + primaryKeyColumns.stream().map(primaryKeyColumn->DatabaseUtil.armor(primaryKeyColumn) + "=" + DatabaseUtil.toValue(row.get(primaryKeyColumn))).collect(joining(" AND ")) + ";", stmt, writer, buf);
+                + " WHERE " + primaryKeyColumns.stream().map(primaryKeyColumn -> DatabaseUtil.armor(primaryKeyColumn) + "=" + DatabaseUtil.toValue(row.get(primaryKeyColumn))).collect(joining(" AND ")) + ";", stmt, writer, buf);
     }
 
     private void insert(PrintWriter writer, Statement stmt, StringBuilder buf, String table, Set<String> columns, Map<String, Object> row, DatabaseUtil.ResultContext rs) throws SQLException {
@@ -380,7 +379,7 @@ public class DataSourceSynchronizer {
 
         }
         executeAndWrite("  (" + row.entrySet().stream()
-                .map(e->anonymize(table, e.getKey(), e.getValue(), row))
+                .map(e -> anonymize(table, e.getKey(), e.getValue(), row))
                 .map(DatabaseUtil::toValue)
                 .collect(joining(",")) + ")", stmt, writer, buf);
         if (rs.isLastRow()) {
