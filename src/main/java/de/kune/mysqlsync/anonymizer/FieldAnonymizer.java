@@ -72,7 +72,7 @@ public interface FieldAnonymizer {
         }
     };
 
-    Map<Pattern, FieldAnonymizer> DEFAULT_ANONYMIZERS = new HashMap<Pattern, FieldAnonymizer>() {{
+    Map<Pattern, FieldAnonymizer> DEFAULT_ANONYMIZERS = new LinkedHashMap<Pattern, FieldAnonymizer>() {{
         put(Pattern.compile("^.*?\\.account_?[hH]older$"), FULL_NAME);
         put(Pattern.compile("^.*?\\.street$"), STREET);
         put(Pattern.compile("^.*?\\.street_?[nN]umber$"), STREET_NUMBER);

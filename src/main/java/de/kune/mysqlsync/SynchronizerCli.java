@@ -176,7 +176,7 @@ public class SynchronizerCli {
     }
 
     private static Map<Pattern, FieldAnonymizer> buildAnonymizers(String[] anonymizers) {
-        Map<Pattern, FieldAnonymizer> result = new HashMap<>();
+        Map<Pattern, FieldAnonymizer> result = new LinkedHashMap<>();
         for (String a: anonymizers) {
             Matcher matcher = Pattern.compile("^\\/(?<regexp>.*)\\/:(?<anonymizer>.*)$")
                     .matcher(a);
