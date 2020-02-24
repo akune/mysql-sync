@@ -83,6 +83,7 @@ public class DataSourceSynchronizer {
         this.source = source;
         this.target = target;
         this.exclusions = new ArrayList<>(exclusions);
+        LOGGER.info("Created data source synchronizer with anonymizers: " + anonymizerMap);
     }
 
     private static Set<String> determineTables(DataSource dataSource, String schema) throws SQLException {
@@ -350,7 +351,13 @@ public class DataSourceSynchronizer {
     private ConcurrentMap<String, Optional<FieldAnonymizer>> cachedAnonymizers = new ConcurrentHashMap<>();
 
     private Optional<FieldAnonymizer> getCachedAnonymizer(String cand) {
-        return cachedAnonymizers.computeIfAbsent(cand, c ->anonymizerMap.entrySet().stream().filter(e -> e.getKey().matcher(c).matches()).findFirst().map(e -> e.getValue()));
+        return cachedAnonymizers.computeIfAbsent(cand, c -> determineAnonymizer(c));
+    }
+
+    private Optional<FieldAnonymizer> determineAnonymizer(String c) {
+        Optional<FieldAnonymizer> result = anonymizerMap.entrySet().stream().filter(e -> e.getKey().matcher(c).matches()).findFirst().map(e -> e.getValue());
+        LOGGER.info("determined anonymizer for input " + c + ": " + result);
+        return result;
     }
 
     private Object anonymize(String table, String column, Object value, Map<String, Object> row) {
