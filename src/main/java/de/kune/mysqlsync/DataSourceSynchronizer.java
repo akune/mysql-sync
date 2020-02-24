@@ -251,8 +251,8 @@ public class DataSourceSynchronizer {
     }
 
     private void dropAndRecreateTable(PrintWriter writer, Statement stmt, StringBuilder localBuf, String sourceSchema, String targetSchema, String table) throws SQLException {
-        String createTable = DatabaseUtil.query(targetSchema == null ? source : target, "show create table " + (targetSchema == null ? sourceSchema : targetSchema) + "." + table).get(0).get("Create Table");
-        executeAndWriteLn("drop table if exists " + table + ";", stmt, writer, localBuf);
+        String createTable = DatabaseUtil.query(targetSchema == null ? source : target, "show create table " + (targetSchema == null ? sourceSchema : targetSchema) + "." + DatabaseUtil.armor(table)).get(0).get("Create Table");
+        executeAndWriteLn("drop table if exists " + DatabaseUtil.armor(table) + ";", stmt, writer, localBuf);
         executeAndWriteLn(createTable + ";", stmt, writer, localBuf);
     }
 
