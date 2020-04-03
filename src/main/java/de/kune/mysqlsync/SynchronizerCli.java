@@ -84,6 +84,9 @@ public class SynchronizerCli {
         Option identityFile = new Option("I", "identity-file", true, "the SSH id_rsa file to authenticate with the jump host");
         options.addOption(identityFile);
 
+        Option identityFilePassphrase = new Option("K", "identity-file-passphrase", true, "the SSH id_rsa file passphrase");
+        options.addOption(identityFilePassphrase);
+
         Option splitByTable = new Option("S", "split-by-table", false, "split by table");
         options.addOption(splitByTable);
 
@@ -114,6 +117,9 @@ public class SynchronizerCli {
                     }
                     if (cmd.getOptionValue(identityFile.getOpt()) != null) {
                         ((DataSourceFactory.TunneledDataSourceFactory) sourceDSF).identityFile(new File(cmd.getOptionValue(identityFile.getOpt())));
+                    }
+                    if (cmd.getOptionValue(identityFilePassphrase.getOpt()) != null) {
+                        ((DataSourceFactory.TunneledDataSourceFactory) sourceDSF).identityFilePassphrase(cmd.getOptionValue(identityFilePassphrase.getOpt()));
                     }
                 } else {
                     sourceDSF = DataSourceFactory.simple();

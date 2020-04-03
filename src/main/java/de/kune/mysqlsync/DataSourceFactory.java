@@ -75,11 +75,12 @@ public abstract class DataSourceFactory implements AutoCloseable {
         private int jumpHostPort = 22;
         private File identityFile = new File("~/.ssh/id_rsa");
         private SshTunnel tunnel;
+        private String identityFilePassphrase;
 
         @Override
         public DataSource build() {
             try {
-                this.tunnel = new SshTunnel(userAtJumpHost, jumpHost, jumpHostPort, super.hostname, super.port, identityFile);
+                this.tunnel = new SshTunnel(userAtJumpHost, jumpHost, jumpHostPort, super.hostname, super.port, identityFile, identityFilePassphrase);
                 return DataSourceFactory.simple()
                         .user(super.user)
                         .password(super.password)
@@ -118,6 +119,10 @@ public abstract class DataSourceFactory implements AutoCloseable {
             return this;
         }
 
+        public TunneledDataSourceFactory identityFilePassphrase(String identityFilePassphrase) {
+            this.identityFilePassphrase = identityFilePassphrase;
+            return this;
+        }
     }
 
 }

@@ -23,14 +23,14 @@ public class SshTunnel implements AutoCloseable {
 
     private Session session;
 
-    public SshTunnel(String user, String host, int port, String targetHost, int targetPort, File privateKeyFile) throws IOException {
-        this(user, host, port, targetHost, targetPort, Files.readAllBytes(privateKeyFile.toPath()));
+    public SshTunnel(String user, String host, int port, String targetHost, int targetPort, File privateKeyFile, String privateKeyFilePassphrase) throws IOException {
+        this(user, host, port, targetHost, targetPort, Files.readAllBytes(privateKeyFile.toPath()), privateKeyFilePassphrase.getBytes());
     }
 
-    public SshTunnel(String user, String host, int port, String targetHost, int targetPort, byte[] privateKey) {
+    public SshTunnel(String user, String host, int port, String targetHost, int targetPort, byte[] privateKey, byte[] privateKeyPassphrase) {
         JSch jsch = new JSch();
         try {
-            jsch.addIdentity(user, privateKey, (byte[])null, (byte[])null);
+            jsch.addIdentity(user, privateKey, (byte[])null, privateKeyPassphrase);
             session = jsch.getSession(user, host, port);
             jsch.setConfig(STRICT_HOST_KEY_CHECKING_KEY, STRICT_HOST_KEY_CHECKING_VALUE);
             forwardedPort = session.setPortForwardingL(0, targetHost, targetPort);

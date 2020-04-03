@@ -166,14 +166,18 @@ public class DataSourceSynchronizer {
         if (targetSchema == null) {
             dryRun = true;
         }
+        if (DatabaseUtil.query(source, "select 1 from dual").isEmpty()) {
+            LOGGER.severe(format("Cannot connect to source database"));
+            throw new RuntimeException("Cannot connect to source database");
+        }
         String outputFile = outputFile(sourceSchema, targetSchema, outputFileInput, compress, incremental, null);
         Set<String> tables = determineSyncTables(sourceSchema, targetSchema);
         LOGGER.info(format("Starting synchronization for source schema: %s", sourceSchema));
         LOGGER.info(format("Configured chunk size is: %d", maxNumberOfRows));
-        LOGGER.info(tables.toString());
         if (tables.isEmpty()) {
             LOGGER.info("No tables found to sync");
         } else {
+            LOGGER.info(format("Tables: %s", tables));
             Map<String, Set<String>> primaryKeyByTable = determinePrimaryKeysOfSyncTables(sourceSchema, targetSchema, tables);
             LOGGER.info(primaryKeyByTable.toString());
             Map<String, Set<String>> columnsByTable = determineSyncColumnsOfSyncTables(sourceSchema, targetSchema, tables);
