@@ -125,6 +125,11 @@
                             <password>${env.DOCKER_HUB_PASSWORD}</password>
                         </auth>
                     </to>
+                    <container>
+                        <jvmFlags>
+                            <jvmFlag>-Xmx4g</jvmFlag>
+                        </jvmFlags>
+                    </container>
                 </configuration>
             </plugin>
         </plugins>
