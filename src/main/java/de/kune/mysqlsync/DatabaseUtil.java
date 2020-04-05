@@ -8,6 +8,8 @@ import java.util.*;
 import java.util.logging.Logger;
 
 import static java.lang.String.format;
+import static java.sql.ResultSet.CONCUR_READ_ONLY;
+import static java.sql.ResultSet.TYPE_FORWARD_ONLY;
 
 public final class DatabaseUtil {
 
@@ -35,8 +37,8 @@ public final class DatabaseUtil {
             this.row = row;
         }
 
-        public ResultContext(ResultSet rs, boolean isFirstChunk) throws SQLException {
-            this(rs.isFirst(), rs.isLast(), rs.getRow());
+        public ResultContext(boolean isFirstRow, boolean isLastRow, int row, boolean isFirstChunk) {
+            this(isFirstRow, isLastRow, row);
             this.isFirstChunk = isFirstChunk;
         }
 
@@ -64,51 +66,53 @@ public final class DatabaseUtil {
 
     public static Map<String, List<Map<String, String>>> query(DataSource dataSource, Set<String> queries) throws SQLException {
         Map<String, List<Map<String, String>>> result = new HashMap<>();
-        Connection connection = dataSource.getConnection();
-        try {
+        try (Connection connection = dataSource.getConnection()) {
             connection.setAutoCommit(false);
             connection.setReadOnly(true);
             for (String q : queries) {
                 result.put(q, query(connection, q));
             }
-        } finally {
-            connection.close();
         }
         return result;
     }
 
 
     private static long query(Connection connection, String query, RowConsumer rowConsumer, boolean isFirstChunk) throws SQLException {
-        Statement stmt = connection.createStatement();
-        long count = 0;
-        try {
+        try (Statement stmt = connection.createStatement(TYPE_FORWARD_ONLY,
+                CONCUR_READ_ONLY)) {
+            int count = 0;
             LOGGER.fine(format("Query: %s", query));
+            stmt.setFetchSize(Integer.MIN_VALUE);
             ResultSet rs = stmt.executeQuery(query);
             ResultSetMetaData md = rs.getMetaData();
-            while (rs.next()) {
-                count++;
-                Map<String, Object> row = new LinkedHashMap<>();
-                for (int i = 1; i <= md.getColumnCount(); i++) {
-                    if (md.getColumnType(i) == Types.TIMESTAMP) {
-                        Timestamp timestamp = rs.getTimestamp(i);
-                        row.put(md.getColumnName(i), Optional.ofNullable(timestamp).map(t ->
-                                new Timestamp(t.getTime() - TimeZone.getDefault().getOffset(t.getTime()))).orElse(null));
-                    } else {
-                        row.put(md.getColumnName(i),
-                                rs.getObject(md.getColumnName(i)));
+            if (rs.next()) {
+                boolean hasNext;
+                do {
+                    Map<String, Object> row = new LinkedHashMap<>();
+                    for (int i = 1; i <= md.getColumnCount(); i++) {
+                        if (md.getColumnType(i) == Types.TIMESTAMP) {
+                            Timestamp timestamp = rs.getTimestamp(i);
+                            row.put(md.getColumnName(i), Optional.ofNullable(timestamp).map(t ->
+                                    new Timestamp(t.getTime() - TimeZone.getDefault().getOffset(t.getTime()))).orElse(null));
+                        } else {
+                            row.put(md.getColumnName(i),
+                                    rs.getObject(md.getColumnName(i)));
+                        }
                     }
-                }
-                rowConsumer.accept(row, new ResultContext(rs, isFirstChunk));
+
+                    boolean isFirst = rs.isFirst();
+                    hasNext = rs.next();
+                    rowConsumer.accept(row, new ResultContext(isFirst, !hasNext, count, isFirstChunk));
+                    count++;
+                } while (hasNext);
             }
             return count;
-        } finally {
-            stmt.close();
         }
     }
 
-    private static List<Map<String, String>> query(Connection connection, String query) throws SQLException {
-        Statement stmt = connection.createStatement();
-        try {
+    private static List<Map<String, String>> query(Connection connection, String query) {
+        try (Statement stmt = connection.createStatement(TYPE_FORWARD_ONLY,
+                CONCUR_READ_ONLY)) {
             ResultSet rs = stmt.executeQuery(query);
             ResultSetMetaData md = rs.getMetaData();
             List<Map<String, String>> result = new LinkedList<>();
@@ -123,19 +127,14 @@ public final class DatabaseUtil {
             return result;
         } catch (RuntimeException|SQLException e) {
             throw new RuntimeException(format("Error while executing query %s", query), e);
-        } finally {
-            stmt.close();
         }
     }
 
     public static List<Map<String, String>> query(DataSource dataSource, String query) throws SQLException {
-        Connection connection = dataSource.getConnection();
-        try {
+        try (Connection connection = dataSource.getConnection()) {
             connection.setAutoCommit(false);
             connection.setReadOnly(true);
             return query(connection, query);
-        } finally {
-            connection.close();
         }
     }
 
@@ -148,8 +147,7 @@ public final class DatabaseUtil {
     }
 
     public static long update(DataSource dataSource, String updateQuery) throws SQLException {
-        Connection connection = dataSource.getConnection();
-        try {
+        try (Connection connection = dataSource.getConnection()) {
             connection.setAutoCommit(false);
             connection.setReadOnly(false);
             // connection.setTransactionIsolation(Connection.TRANSACTION_SERIALIZABLE);
@@ -160,8 +158,6 @@ public final class DatabaseUtil {
                 result += stmt.executeUpdate(update);
             }
             return result;
-        } finally {
-            connection.close();
         }
     }
 
