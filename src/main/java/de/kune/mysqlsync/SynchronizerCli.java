@@ -78,6 +78,9 @@ public class SynchronizerCli {
         Option exclusion = new Option("x", "exclude", true, "exclude this pattern");
         options.addOption(exclusion);
 
+        Option pattern = new Option("pt", "pattern", true, "include this pattern");
+        options.addOption(pattern);
+
         Option jumpHost = new Option("J", "jump-host", true, "the SSH user name and jump host to connect the source database");
         options.addOption(jumpHost);
 
@@ -154,11 +157,13 @@ public class SynchronizerCli {
                     }
                 }
                 List<Pattern> exclusions = Optional.ofNullable(cmd.getOptionValues(exclusion.getOpt())).map(Arrays::stream).map(s -> s.map(Pattern::compile).collect(Collectors.toList())).orElse(Collections.emptyList());
+                List<Pattern> patterns = Optional.ofNullable(cmd.getOptionValues(pattern.getOpt())).map(Arrays::stream).map(s -> s.map(Pattern::compile).collect(Collectors.toList())).orElse(Collections.emptyList());
                 DataSourceSynchronizer.builder()
                         .source(dataSource)
                         .target(targetDataSource)
                         .anonymizerMap(anonymizers)
                         .exclusions(exclusions)
+                        .patterns(patterns)
                         .build()
                         .sync(sourceSchema,
                                 targetSchema,

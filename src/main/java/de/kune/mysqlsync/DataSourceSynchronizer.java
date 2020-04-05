@@ -28,15 +28,17 @@ public class DataSourceSynchronizer {
     private final DataSource source, target;
     private final Map<Pattern, FieldAnonymizer> anonymizerMap;
     private final List<Pattern> exclusions;
+    private final ArrayList<Pattern> patterns;
     private Date creationDate = new Date();
 
     public static class Factory {
         private DataSource source, target;
         private Map<Pattern, FieldAnonymizer> anonymizerMap = Collections.emptyMap();
         private List<Pattern> exclusions = new ArrayList<>();
+        private List<Pattern> patterns = new ArrayList<>();
 
         public DataSourceSynchronizer build() {
-            return new DataSourceSynchronizer(source, target, anonymizerMap, exclusions);
+            return new DataSourceSynchronizer(source, target, anonymizerMap, patterns, exclusions);
         }
 
         public Factory source(DataSource source) {
@@ -68,19 +70,25 @@ public class DataSourceSynchronizer {
             this.exclusions.add(Pattern.compile(exclusionPattern));
             return this;
         }
+
+        public Factory patterns(List<Pattern> patterns) {
+            this.patterns = new ArrayList<>(patterns);
+            return this;
+        }
     }
 
     public static Factory builder() {
         return new Factory();
     }
 
-    public DataSourceSynchronizer(DataSource source, DataSource target, Map<Pattern, FieldAnonymizer> anonymizerMap, List<Pattern> exclusions) {
+    public DataSourceSynchronizer(DataSource source, DataSource target, Map<Pattern, FieldAnonymizer> anonymizerMap, List<Pattern> patterns, List<Pattern> exclusions) {
         assert (source != null);
         assert (anonymizerMap != null);
         assert (exclusions != null);
         this.anonymizerMap = new LinkedHashMap<>(anonymizerMap);
         this.source = source;
         this.target = target;
+        this.patterns =  new ArrayList<>(patterns);
         this.exclusions = new ArrayList<>(exclusions);
         LOGGER.info("Created data source synchronizer with anonymizers: " + anonymizerMap);
     }
@@ -132,15 +140,15 @@ public class DataSourceSynchronizer {
     private Map<String, Set<String>> determineSyncColumnsOfSyncTables(String sourceSchema, String targetSchema, Set<String> tables) throws SQLException {
         Map<String, Set<String>> sourceColumnsByTable = DatabaseUtil.query(source, "SELECT t.table_name, c.column_name\n" +
                 "  FROM INFORMATION_SCHEMA.TABLES t\n" +
-                "  LEFT JOIN INFORMATION_SCHEMA.COLUMNS c on c.table_name = t.table_name and c.table_schema = t.table_schema and c.column_key <> 'PRI'\n" +
+                "  LEFT JOIN INFORMATION_SCHEMA.COLUMNS c on c.table_name = t.table_name and c.table_schema = t.table_schema\n" +
                 "  WHERE t.TABLE_SCHEMA='" + sourceSchema + "' and t.table_name in (" + tables.stream().map(DatabaseUtil::toValue).collect(joining(", ")) + ")").stream()
                 .collect(Collectors.toMap(e -> e.get("TABLE_NAME"), e -> new HashSet<>(asList(e.get("COLUMN_NAME")).stream().filter(x -> x != null).collect(toList())), (e1, e2) -> Stream.concat(e1.stream(), e2.stream()).collect(toSet())));
         if (targetSchema == null) {
-            return withoutExclusions(sourceColumnsByTable);
+            return withoutExclusions(withPatterns(sourceColumnsByTable));
         } else {
             Map<String, List<String>> targetColumnsByTable = DatabaseUtil.query(target, "SELECT t.table_name, c.column_name\n" +
                     "  FROM INFORMATION_SCHEMA.TABLES t\n" +
-                    "  LEFT JOIN INFORMATION_SCHEMA.COLUMNS c on c.table_name = t.table_name and c.table_schema = t.table_schema and c.column_key <> 'PRI'\n" +
+                    "  LEFT JOIN INFORMATION_SCHEMA.COLUMNS c on c.table_name = t.table_name and c.table_schema = t.table_schema\n" +
                     "  WHERE t.TABLE_SCHEMA='" + targetSchema + "' and t.table_name in (" + tables.stream().map(DatabaseUtil::toValue).collect(joining(", ")) + ")").stream()
                     .collect(Collectors.toMap(e -> e.get("TABLE_NAME"), e -> asList(e.get("COLUMN_NAME")), (e1, e2) -> Stream.concat(e1.stream(), e2.stream()).collect(toList())));
             Map<String, Set<String>> result = new HashMap<>();
@@ -150,8 +158,19 @@ public class DataSourceSynchronizer {
                 columns.remove(null);
                 result.put(table, columns);
             }
-            return withoutExclusions(result);
+            return withoutExclusions(withPatterns(result));
         }
+    }
+
+    private Map<String, Set<String>> withPatterns(Map<String, Set<String>> columnsByTable) {
+        if (patterns.isEmpty()) {
+            return columnsByTable;
+        }
+        return columnsByTable.entrySet().stream()
+                .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue()
+                        .stream()
+                        .filter(f -> patterns.stream().anyMatch(x -> x.matcher(e.getKey() + "." + f).matches())).collect(toSet())
+                )).entrySet().stream().filter(e->!e.getValue().isEmpty()).collect(Collectors.toMap(e->e.getKey(), e->e.getValue()));
     }
 
     private Map<String, Set<String>> withoutExclusions(Map<String, Set<String>> columnsByTable) {
@@ -159,7 +178,7 @@ public class DataSourceSynchronizer {
                 .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue()
                         .stream()
                         .filter(f -> !exclusions.stream().anyMatch(x -> x.matcher(e.getKey() + "." + f).matches())).collect(toSet())
-                ));
+                )).entrySet().stream().filter(e->!e.getValue().isEmpty()).collect(Collectors.toMap(e->e.getKey(), e->e.getValue()));
     }
 
     public void sync(String sourceSchema, String targetSchema, String outputFileInput, boolean compress, boolean splitByTable, boolean dropAndRecreateTables, boolean dryRun, boolean incremental, boolean allowParallel, int maxNumberOfRows) throws SQLException, IOException {
@@ -219,36 +238,39 @@ public class DataSourceSynchronizer {
     private Consumer<String> synchronizeTable(String sourceSchema, String targetSchema, String outputFileInput, boolean compress, boolean splitByTable, boolean dropAndRecreateTables, boolean incremental, int maxNumberOfRows, Map<String, Set<String>> primaryKeyByTable, Map<String, Set<String>> columnsByTable, PrintWriter oneWriter, Statement stmt, StringBuilder buf) {
         return table -> {
             Set<String> columns = new LinkedHashSet<>();
-            columns.addAll(primaryKeyByTable.get(table));
-            columns.addAll(columnsByTable.get(table));
-            LOGGER.info("Synchronizing " + table);
-            try {
-                PrintWriter writer;
-                StringBuilder localBuf = buf;
-                if (splitByTable) {
-                    localBuf = targetSchema == null ? null : new StringBuilder();
-                    writer = openWriter(outputFile(sourceSchema, targetSchema, outputFileInput, compress, incremental, table), compress);
-                    writeHeader(stmt, writer, localBuf);
-                } else {
-                    writer = oneWriter;
-                }
-                if (incremental) {
-                    loadIncrementally(sourceSchema, targetSchema, table, primaryKeyByTable.get(table), columns,
-                            fullLoadRowConsumer(writer, stmt, localBuf, table, columns),
-                            incrementalNewRowConsumer(writer, stmt, localBuf, table, columns),
-                            incrementalUpdateRowConsumer(writer, stmt, localBuf, table, columns, primaryKeyByTable.get(table)), maxNumberOfRows);
-                } else {
-                    if (dropAndRecreateTables) {
-                        dropAndRecreateTable(writer, stmt, localBuf, sourceSchema, targetSchema, table);
+            if (columnsByTable.get(table) == null) {
+                LOGGER.info("Skipping " + table);
+            } else {
+                columns.addAll(columnsByTable.get(table));
+                LOGGER.info("Synchronizing " + table);
+                try {
+                    PrintWriter writer;
+                    StringBuilder localBuf = buf;
+                    if (splitByTable) {
+                        localBuf = targetSchema == null ? null : new StringBuilder();
+                        writer = openWriter(outputFile(sourceSchema, targetSchema, outputFileInput, compress, incremental, table), compress);
+                        writeHeader(stmt, writer, localBuf);
+                    } else {
+                        writer = oneWriter;
                     }
-                    processTable(sourceSchema, table, columns, fullLoadRowConsumer(writer, stmt, localBuf, table, columns), maxNumberOfRows);
+                    if (incremental) {
+                        loadIncrementally(sourceSchema, targetSchema, table, primaryKeyByTable.get(table), columns,
+                                fullLoadRowConsumer(writer, stmt, localBuf, table, columns),
+                                incrementalNewRowConsumer(writer, stmt, localBuf, table, columns),
+                                incrementalUpdateRowConsumer(writer, stmt, localBuf, table, columns, primaryKeyByTable.get(table)), maxNumberOfRows);
+                    } else {
+                        if (dropAndRecreateTables) {
+                            dropAndRecreateTable(writer, stmt, localBuf, sourceSchema, targetSchema, table);
+                        }
+                        processTable(sourceSchema, table, columns, fullLoadRowConsumer(writer, stmt, localBuf, table, columns), maxNumberOfRows);
+                    }
+                    if (splitByTable) {
+                        writeFooter(stmt, writer, localBuf);
+                        closeWriter(writer);
+                    }
+                } catch (SQLException e) {
+                    throw new RuntimeException(e);
                 }
-                if (splitByTable) {
-                    writeFooter(stmt, writer, localBuf);
-                    closeWriter(writer);
-                }
-            } catch (SQLException e) {
-                throw new RuntimeException(e);
             }
         };
     }
@@ -341,6 +363,7 @@ public class DataSourceSynchronizer {
 
     private DatabaseUtil.RowConsumer fullLoadRowConsumer(PrintWriter writer, Statement stmt, StringBuilder buf, String table, Set<String> columns) {
         return (row, rs) -> {
+            LOGGER.finest("Consuming row " + row);
             truncate(writer, stmt, buf, table, rs);
             insert(writer, stmt, buf, table, columns, row, rs);
         };
@@ -360,7 +383,9 @@ public class DataSourceSynchronizer {
 
     private Optional<FieldAnonymizer> determineAnonymizer(String c) {
         Optional<FieldAnonymizer> result = anonymizerMap.entrySet().stream().filter(e -> e.getKey().matcher(c).matches()).findFirst().map(e -> e.getValue());
-        LOGGER.info("determined anonymizer for input " + c + ": " + result);
+        if (result.isPresent()) {
+            LOGGER.info("Determined anonymizer for input " + c + ": " + result);
+        }
         return result;
     }
 
@@ -377,7 +402,6 @@ public class DataSourceSynchronizer {
 
     private void insert(PrintWriter writer, Statement stmt, StringBuilder buf, String table, Set<String> columns, Map<String, Object> row, DatabaseUtil.ResultContext rs) throws SQLException {
         if (rs.isFirstRow()) {
-//            executeAndWriteLn("ALTER TABLE " + DatabaseUtil.armor(table) + " DISABLE KEYS;", stmt, writer, buf);
             executeAndWriteLn("LOCK TABLES " + DatabaseUtil.armor(table) + " WRITE;", stmt, writer, buf);
             executeAndWriteLn("/*!40000 ALTER TABLE " + DatabaseUtil.armor(table) + " DISABLE KEYS */;", stmt, writer, buf);
             executeAndWriteLn("INSERT " + DatabaseUtil.armor(table) + " (" + columns.stream().map(DatabaseUtil::armor).collect(joining(",")) + ") VALUES ", stmt, writer, buf);
@@ -389,7 +413,6 @@ public class DataSourceSynchronizer {
                 .collect(joining(",")) + ")", stmt, writer, buf);
         if (rs.isLastRow()) {
             executeAndWriteLn(";", stmt, writer, buf);
-//            executeAndWriteLn("ALTER TABLE " + DatabaseUtil.armor(table) + " ENABLE KEYS;", stmt, writer, buf);
             executeAndWriteLn("/*!40000 ALTER TABLE " + DatabaseUtil.armor(table) + " ENABLE KEYS */;", stmt, writer, buf);
             executeAndWriteLn("UNLOCK TABLES;", stmt, writer, buf);
         } else if (rs.getRow() > 1 && (rs.getRow() - 1) % 150 == 0) {
@@ -445,8 +468,6 @@ public class DataSourceSynchronizer {
             final String lastModifiedDateColumn = columns.contains("lastModifiedDate") ? "lastModifiedDate" : "last_modified_date";
             // TODO: Determine max creation and last modified date in target table -> maxDate
             Optional<String> maxDate = DatabaseUtil.query(target, "select greatest(ifnull(max(" + DatabaseUtil.armor(lastModifiedDateColumn) + "), '0000-01-01 00:00:00'), ifnull(max(" + DatabaseUtil.armor(creationDateColumn) + "), '0000-01-01 00:00:00')) as maxDate from " + DatabaseUtil.armor(targetSchema) + "." + DatabaseUtil.armor(table)).stream().findAny().map(e -> e.get("maxDate"));
-//            Optional<String> sourceMaxDate = query(source, "select greatest(max(" + armor(lastModifiedDateColumn) + "), max(" + armor(creationDateColumn) + ")) as maxDate from " + armor(sourceSchema) + "." + armor(table)).stream().findAny().map(e->e.get("maxDate"));
-
             if (maxDate.isPresent()) {
                 // TODO: Fetch all entries from the source table with creation date before maxDate and insert them into the target table
                 DatabaseUtil.query(source, "SELECT " + columns.stream().map(DatabaseUtil::armor).collect(joining(", ")) + " FROM " + DatabaseUtil.armor(sourceSchema) + "." + DatabaseUtil.armor(table) + " where " + DatabaseUtil.armor(creationDateColumn) + " > '" + maxDate.get() + "'", newRowConsumer, true);
