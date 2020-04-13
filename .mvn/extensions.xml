@@ -2,8 +2,7 @@
             xsi:schemaLocation="http://maven.apache.org/EXTENSIONS/1.0.0 http://maven.apache.org/xsd/core-extensions-1.0.0.xsd">
     <extension>
         <groupId>com.github.akune</groupId>
-        <!--<groupId>de.kune</groupId>-->
         <artifactId>maven-version-extension</artifactId>
-        <version>0.6.0</version>
+        <version>1.0.0</version>
     </extension>
 </extensions>

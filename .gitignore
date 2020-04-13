@@ -1,0 +1,8 @@
+sync/
+target/
+parameters/
+.m2/
+.idea/
+id_rsa
+*.iml
+dependency-reduced-pom.xml
